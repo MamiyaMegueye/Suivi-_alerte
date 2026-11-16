@@ -1,7 +1,15 @@
-﻿.env
+﻿backend/.env
+backend/.venv/
 __pycache__/
-*.pyc
+frontend/node_modules/
+frontend/dist/
+backend/data/
+
+# Modèle des objectifs : données extraites et résultats
+backend/modele_objectifs/donnees/
+backend/modele_objectifs/sorties/
+.env
 *.log
 data/
 _sauvegarde*/
-.venv/
+*.bak
