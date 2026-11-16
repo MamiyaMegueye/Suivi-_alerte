@@ -1,0 +1,2980 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SNDE — Alerte Baisse de Facturation</title>
+<style>
+/* ============================================================
+   Palette SNDE — même nuancier que le dashboard
+   ============================================================ */
+:root{
+  --snde-50:#EFF6FB; --snde-100:#D3E6F2; --snde-200:#A5C9E2;
+  --snde-300:#71A8CC; --snde-400:#3FA9C9; --snde-500:#1565A0;
+  --snde-600:#0F4F86; --snde-700:#0A3A6A; --snde-800:#0A2A4E;
+  --snde-900:#06203D;
+  --slate-50:#f8fafc; --slate-100:#f1f5f9; --slate-200:#e2e8f0;
+  --slate-300:#cbd5e1; --slate-400:#94a3b8; --slate-500:#64748b;
+  --slate-600:#475569; --slate-700:#334155; --slate-900:#0f172a;
+  --rose-50:#fff1f2; --rose-100:#ffe4e6; --rose-200:#fecdd3;
+  --rose-500:#f43f5e; --rose-600:#e11d48; --rose-700:#be123c;
+  --rose-900:#881337;
+  --amber-50:#fffbeb; --amber-100:#fef3c7; --amber-200:#fde68a;
+  --amber-700:#b45309;
+  --emerald-50:#ecfdf5; --emerald-200:#a7f3d0; --emerald-500:#10b981;
+  --emerald-700:#047857;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--slate-100); color:var(--slate-700);
+  font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,
+       "Helvetica Neue",Arial,"Noto Sans",sans-serif;
+}
+.tnum{font-variant-numeric:tabular-nums}
+
+/* ---------- En-tête ---------- */
+header{
+  background:linear-gradient(135deg,var(--snde-800),var(--snde-600));
+  color:#fff; padding:14px 22px; box-shadow:0 1px 3px rgba(0,0,0,.18);
+}
+.hwrap{max-width:1400px;margin:0 auto;display:flex;flex-wrap:wrap;
+  gap:14px;align-items:center;justify-content:space-between}
+.htitle{display:flex;align-items:center;gap:11px}
+.hlogo{width:34px;height:34px;border-radius:9px;background:rgba(255,255,255,.14);
+  display:grid;place-items:center;font-weight:700;font-size:13px;
+  border:1px solid rgba(255,255,255,.22)}
+.htitle h1{margin:0;font-size:16px;font-weight:600;letter-spacing:.2px}
+.htitle p{margin:1px 0 0;font-size:11.5px;color:var(--snde-100)}
+.hright{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.chip{background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.22);
+  border-radius:7px;padding:4px 9px;font-size:11px;color:#fff;
+  display:inline-flex;align-items:center;gap:6px}
+.chip.warn{background:rgba(244,63,94,.3);border-color:rgba(254,205,211,.55)}
+.chip.good{background:rgba(16,185,129,.26);border-color:rgba(167,243,208,.5)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--slate-400)}
+.dot.on{background:var(--emerald-500);box-shadow:0 0 0 3px rgba(16,185,129,.25)}
+.dot.off{background:var(--rose-500);box-shadow:0 0 0 3px rgba(244,63,94,.25)}
+
+/* ---------- Bandeau d'alerte rouge ---------- */
+/* Il reste affiché tant que les alertes n'ont pas été consultées. */
+#bandeau{display:none;position:sticky;top:0;z-index:40}
+#bandeau.on{display:block}
+.bandeau-in{
+  background:linear-gradient(135deg,var(--rose-700),var(--rose-600));
+  color:#fff;padding:11px 22px;box-shadow:0 2px 10px rgba(136,19,55,.35);
+}
+.bandeau-wrap{max-width:1400px;margin:0 auto;display:flex;gap:14px;
+  align-items:center;justify-content:space-between;flex-wrap:wrap}
+.bandeau-txt{display:flex;align-items:center;gap:12px}
+.bandeau-ic{width:30px;height:30px;border-radius:50%;
+  background:rgba(255,255,255,.2);display:grid;place-items:center;
+  font-size:16px;font-weight:700;flex:none}
+.bandeau-txt b{font-size:14.5px}
+.bandeau-txt p{margin:1px 0 0;font-size:12px;color:var(--rose-100)}
+.bandeau-act{display:flex;gap:8px;flex-wrap:wrap}
+.bandeau-act button{
+  background:#fff;color:var(--rose-700);border:none;border-radius:8px;
+  padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer}
+.bandeau-act button:hover{background:var(--rose-50)}
+.bandeau-act button.ghost{background:rgba(255,255,255,.16);color:#fff;
+  border:1px solid rgba(255,255,255,.3)}
+.bandeau-act button.ghost:hover{background:rgba(255,255,255,.26)}
+@keyframes flash{0%,100%{opacity:1}50%{opacity:.55}}
+#bandeau.flash .bandeau-in{animation:flash .7s ease-in-out 3}
+
+/* ---------- Mise en page ---------- */
+main{max-width:1400px;margin:0 auto;padding:18px 22px 60px;
+  display:flex;flex-direction:column;gap:16px}
+.card{background:#fff;border:1px solid var(--slate-200);border-radius:12px;
+  box-shadow:0 1px 2px rgba(15,23,42,.05)}
+.card.alerte{border-color:var(--rose-200)}
+.card-h{padding:11px 14px;border-bottom:1px solid var(--slate-100);
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  flex-wrap:wrap}
+.card-t{font-size:11px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.07em;color:var(--slate-500);margin:0}
+.card-sub{font-size:11.5px;color:var(--slate-400);margin:2px 0 0}
+.card-b{padding:12px 14px}
+
+/* ---------- KPI ---------- */
+.kpis{display:grid;gap:12px;grid-template-columns:repeat(4,1fr)}
+@media(max-width:980px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{background:#fff;border:1px solid var(--slate-200);border-radius:12px;
+  padding:12px 14px;box-shadow:0 1px 2px rgba(15,23,42,.05)}
+.kpi .lab{font-size:10.5px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--slate-500)}
+.kpi .val{font-size:25px;font-weight:700;color:var(--slate-900);
+  margin-top:3px;font-variant-numeric:tabular-nums}
+.kpi .sub{font-size:11.5px;color:var(--slate-400);margin-top:2px}
+.kpi.danger{border-color:var(--rose-200);background:var(--rose-50)}
+.kpi.danger .val{color:var(--rose-700)}
+.kpi.good{border-color:var(--emerald-200);background:var(--emerald-50)}
+.kpi.good .val{color:var(--emerald-700)}
+.kpi.info{border-color:var(--snde-200);background:var(--snde-50)}
+.kpi.info .val{color:var(--snde-600)}
+
+/* ---------- Contrôles ---------- */
+.bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+label.fl{font-size:10.5px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--slate-500)}
+select,input[type=number],input[type=search]{
+  font:inherit;font-size:13px;color:var(--slate-700);background:#fff;
+  border:1px solid var(--slate-200);border-radius:8px;padding:6px 9px}
+select:focus,input:focus{outline:none;border-color:var(--snde-400);
+  box-shadow:0 0 0 3px var(--snde-100)}
+button{font:inherit;cursor:pointer;border-radius:8px;padding:6px 11px;
+  font-size:12.5px;font-weight:500;border:1px solid var(--slate-200);
+  background:#fff;color:var(--slate-600);transition:background .12s}
+button:hover{background:var(--slate-50)}
+button.primary{background:var(--snde-50);border-color:var(--snde-200);
+  color:var(--snde-700)}
+button.primary:hover{background:var(--snde-100)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.switch{display:flex;align-items:center;gap:6px;font-size:12.5px;
+  color:var(--slate-600)}
+
+/* ---------- Tableaux ---------- */
+.twrap{overflow:auto;max-height:62vh;border-top:1px solid var(--slate-100)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+thead{position:sticky;top:0;z-index:2;background:var(--slate-50)}
+thead th{padding:8px 10px;text-align:left;font-size:10.5px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.055em;color:var(--slate-600);
+  border-bottom:1px solid var(--slate-200);white-space:nowrap;cursor:pointer;
+  user-select:none}
+thead th.nosort{cursor:default}
+thead th .ar{color:var(--snde-500);font-size:9px;margin-left:3px}
+tbody td{padding:7px 10px;border-bottom:1px solid var(--slate-100);
+  white-space:nowrap}
+tbody tr{transition:background .1s}
+tbody tr.clic{cursor:pointer}
+tbody tr:hover{background:var(--slate-50)}
+tbody tr.g-FORTE{background:rgba(190,18,60,.09)}
+tbody tr.g-FORTE:hover{background:rgba(190,18,60,.16)}
+tbody tr.g-DISPARU{background:rgba(136,19,55,.13)}
+tbody tr.g-DISPARU:hover{background:rgba(136,19,55,.2)}
+tbody tr.g-VOLUME_NUL{background:rgba(190,18,60,.09)}
+tbody tr.g-VOLUME_NUL:hover{background:rgba(190,18,60,.16)}
+tbody tr.g-MOYENNE{background:rgba(244,63,94,.07)}
+tbody tr.g-MOYENNE:hover{background:rgba(244,63,94,.13)}
+tbody tr.g-LEGERE{background:rgba(251,191,36,.1)}
+tbody tr.g-LEGERE:hover{background:rgba(251,191,36,.18)}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.neg{color:var(--rose-700);font-weight:600}
+.pos{color:var(--emerald-700)}
+.mut{color:var(--slate-400)}
+
+/* ---------- Badges ---------- */
+.b{display:inline-block;padding:1.5px 7px;border-radius:999px;
+  font-size:10.5px;font-weight:700;border:1px solid;white-space:nowrap}
+.b-FORTE{background:var(--rose-100);color:var(--rose-900);
+  border-color:var(--rose-200)}
+.b-DISPARU{background:var(--rose-700);color:#fff;border-color:var(--rose-700)}
+.b-VOLUME_NUL{background:var(--rose-100);color:var(--rose-900);
+  border-color:var(--rose-500)}
+.b-MOYENNE{background:var(--rose-50);color:var(--rose-700);
+  border-color:var(--rose-200)}
+.b-LEGERE{background:var(--amber-50);color:var(--amber-700);
+  border-color:var(--amber-200)}
+.b-ESTIMEE{background:var(--amber-50);color:var(--amber-700);
+  border-color:var(--amber-200)}
+.b-STABLE{background:var(--slate-100);color:var(--slate-600);
+  border-color:var(--slate-200)}
+.b-HAUSSE{background:var(--emerald-50);color:var(--emerald-700);
+  border-color:var(--emerald-200)}
+.b-NOUVEAU{background:var(--snde-50);color:var(--snde-600);
+  border-color:var(--snde-200)}
+.b-VIDE{background:var(--slate-50);color:var(--slate-400);
+  border-color:var(--slate-200)}
+.b-et{background:var(--slate-100);color:var(--slate-600);
+  border-color:var(--slate-200)}
+.b-et.FACTURE{background:var(--emerald-50);color:var(--emerald-700);
+  border-color:var(--emerald-200)}
+.b-et.EN_COURS{background:var(--snde-50);color:var(--snde-600);
+  border-color:var(--snde-200)}
+.b-et.NON_COMMENCE{background:var(--amber-50);color:var(--amber-700);
+  border-color:var(--amber-200)}
+.b-et.ABSENT{background:var(--rose-50);color:var(--rose-700);
+  border-color:var(--rose-200)}
+.b-prov{background:var(--amber-50);color:var(--amber-700);
+  border-color:var(--amber-200)}
+.b-new{background:var(--rose-600);color:#fff;border-color:var(--rose-600)}
+.b-vu{background:var(--slate-100);color:var(--slate-500);
+  border-color:var(--slate-200)}
+
+/* ---------- Barre d'avancement ---------- */
+.pb{width:58px;height:5px;border-radius:999px;background:var(--slate-200);
+  overflow:hidden;display:inline-block;vertical-align:middle;margin-left:6px}
+.pb i{display:block;height:100%;background:var(--snde-500)}
+
+/* ---------- Bandeau de retard, jaune ---------- */
+#bandeau-retard{display:none;position:sticky;top:0;z-index:39}
+#bandeau-retard.on{display:block}
+.bandeau-jaune{
+  background:linear-gradient(135deg,#B45309,#D97706);
+  color:#fff;padding:11px 22px;box-shadow:0 2px 10px rgba(180,83,9,.3);
+}
+.bandeau-jaune .bandeau-txt p{color:#FEF3C7}
+.bandeau-jaune .bandeau-act button{color:#B45309}
+.bandeau-jaune .bandeau-act button:hover{background:#FFFBEB}
+#bandeau-retard.flash .bandeau-jaune{animation:flash .7s ease-in-out 3}
+
+/* ---------- Chips de filtre ---------- */
+.chips{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.chips button{border:1px solid var(--slate-200);background:#fff;
+  color:var(--slate-600);border-radius:999px;padding:5px 13px;
+  font-size:12.5px;font-weight:500}
+.chips button:hover{background:var(--slate-50)}
+.chips button.on{background:var(--snde-700);color:#fff;
+  border-color:var(--snde-700)}
+.chips button.on:hover{background:var(--snde-700)}
+.chips button.rouge{border-color:var(--rose-200);background:var(--rose-50);
+  color:var(--rose-700)}
+.chips button.rouge.on{background:var(--rose-700);color:#fff;
+  border-color:var(--rose-700)}
+.chips button.jaune{border-color:var(--amber-200);
+  background:var(--amber-50);color:var(--amber-700)}
+.chips button.jaune.on{background:#B45309;color:#fff;border-color:#B45309}
+.chips button:disabled{opacity:.45}
+.titre-retard{font-size:17px;font-weight:700;color:var(--slate-900);
+  margin:0}
+.titre-retard.neg{color:var(--rose-700)}
+
+/* ---------- Situations de retard ---------- */
+.b-ur{background:var(--slate-100);color:var(--slate-600);
+  border-color:var(--slate-200)}
+.b-ur.EN_RETARD{background:#B45309;color:#fff;border-color:#B45309}
+.b-ur.DEADLINE_PROCHE{background:var(--amber-50);color:var(--amber-700);
+  border-color:var(--amber-200)}
+.b-ur.A_TEMPS{background:var(--snde-50);color:var(--snde-600);
+  border-color:var(--snde-200)}
+.b-ur.A_FACTURER{background:var(--slate-100);color:var(--slate-600);
+  border-color:var(--slate-300)}
+.b-ur.A_FACTURER_EN_RETARD{background:var(--amber-50);
+  color:var(--amber-700);border-color:var(--amber-200)}
+tbody tr.u-A_FACTURER_EN_RETARD{background:rgba(251,191,36,.06)}
+.b-ur.FACTURE{background:var(--emerald-50);color:var(--emerald-700);
+  border-color:var(--emerald-200)}
+.b-ur.FACTURE_EN_RETARD{background:var(--amber-100);color:var(--amber-700);
+  border-color:var(--amber-200)}
+.b-ur.PAS_DE_PLANNING{background:var(--rose-50);color:var(--rose-700);
+  border-color:var(--rose-200)}
+tbody tr.u-EN_RETARD{background:rgba(180,83,9,.1)}
+tbody tr.u-EN_RETARD:hover{background:rgba(180,83,9,.18)}
+tbody tr.u-DEADLINE_PROCHE{background:rgba(251,191,36,.09)}
+tbody tr.u-DEADLINE_PROCHE:hover{background:rgba(251,191,36,.16)}
+tbody tr.u-PAS_DE_PLANNING{background:rgba(244,63,94,.05)}
+.kpi.warn{border-color:var(--amber-200);background:var(--amber-50)}
+.kpi.warn .val{color:var(--amber-700)}
+.cnt.warn{background:#D97706;color:#fff}
+
+/* ---------- Onglets ---------- */
+.tabs{background:#fff;border:1px solid var(--slate-200);border-radius:12px;
+  padding:6px;display:flex;gap:4px;flex-wrap:wrap;
+  box-shadow:0 1px 2px rgba(15,23,42,.05)}
+.tabs button{border:none;background:transparent;color:var(--slate-600);
+  padding:8px 14px;border-radius:9px;font-size:13px;font-weight:500;
+  display:inline-flex;align-items:center;gap:7px}
+.tabs button:hover{background:var(--slate-50)}
+.tabs button.on{background:var(--snde-600);color:#fff}
+.tabs button.on:hover{background:var(--snde-600)}
+.tabs .cnt{background:var(--slate-200);color:var(--slate-700);
+  border-radius:999px;padding:1px 7px;font-size:10.5px;font-weight:700;
+  font-variant-numeric:tabular-nums}
+.tabs button.on .cnt{background:rgba(255,255,255,.25);color:#fff}
+.tabs .cnt.danger{background:var(--rose-500);color:#fff}
+.vue{display:none;flex-direction:column;gap:16px}
+.vue.on{display:flex}
+
+/* ---------- Statut de saisie ---------- */
+.b-sa{background:var(--slate-100);color:var(--slate-600);
+  border-color:var(--slate-200)}
+.b-sa.FACTURE{background:var(--emerald-50);color:var(--emerald-700);
+  border-color:var(--emerald-200)}
+.b-sa.RELEVE{background:var(--snde-50);color:var(--snde-600);
+  border-color:var(--snde-200)}
+.b-sa.NON_RELEVE{background:var(--amber-50);color:var(--amber-700);
+  border-color:var(--amber-200)}
+.b-sa.HORS_PARC{background:var(--rose-50);color:var(--rose-700);
+  border-color:var(--rose-200)}
+.b-NON_RELEVE{background:var(--amber-50);color:var(--amber-700);
+  border-color:var(--amber-200)}
+.b-EN_ATTENTE_FACT{background:var(--snde-50);color:var(--snde-600);
+  border-color:var(--snde-200)}
+tbody tr.g-EN_ATTENTE_FACT{background:rgba(21,101,160,.05)}
+tbody tr.g-EN_ATTENTE_FACT:hover{background:rgba(21,101,160,.1)}
+tbody tr.g-NON_RELEVE{background:rgba(251,191,36,.07)}
+tbody tr.g-NON_RELEVE:hover{background:rgba(251,191,36,.14)}
+
+/* ---------- Barre d'avancement large ---------- */
+.pbw{display:flex;align-items:center;gap:7px;min-width:150px}
+.pbw .track{flex:1;height:8px;border-radius:999px;background:var(--slate-200);
+  overflow:hidden}
+.pbw .track i{display:block;height:100%;background:var(--snde-500);
+  transition:width .3s}
+.pbw .track i.full{background:var(--emerald-500)}
+.pbw .track i.low{background:var(--amber-200)}
+.pbw span{font-size:11.5px;font-variant-numeric:tabular-nums;
+  color:var(--slate-600);min-width:42px;text-align:right}
+
+/* ---------- Graphe de progression quotidienne ---------- */
+.graphe{padding:14px}
+.graphe svg{width:100%;height:170px;display:block}
+.g-axe{stroke:var(--slate-200);stroke-width:1}
+.g-bar{fill:var(--snde-300)}
+.g-bar:hover{fill:var(--snde-500)}
+.g-line{fill:none;stroke:var(--rose-600);stroke-width:2}
+.g-pt{fill:var(--rose-600)}
+.g-txt{font-size:10px;fill:var(--slate-500)}
+.g-leg{display:flex;gap:14px;flex-wrap:wrap;padding:0 14px 12px;
+  font-size:11.5px;color:var(--slate-500)}
+.g-leg i{display:inline-block;width:10px;height:10px;border-radius:2px;
+  margin-right:5px;vertical-align:middle}
+
+/* ---------- Modale ---------- */
+.ov{position:fixed;inset:0;background:rgba(10,42,78,.55);display:none;
+  align-items:flex-start;justify-content:center;padding:28px 16px;z-index:60;
+  overflow:auto}
+.ov.on{display:flex}
+.mo{background:#fff;border-radius:14px;width:100%;max-width:1320px;
+  box-shadow:0 18px 50px rgba(6,32,61,.3);overflow:hidden}
+.mo-h{background:linear-gradient(135deg,var(--snde-800),var(--snde-600));
+  color:#fff;padding:14px 18px;display:flex;justify-content:space-between;
+  gap:14px;align-items:flex-start;flex-wrap:wrap}
+.mo-h h2{margin:0;font-size:15.5px;font-weight:600}
+.mo-h p{margin:3px 0 0;font-size:12px;color:var(--snde-100)}
+.mo-x{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.25);
+  color:#fff;border-radius:8px;padding:5px 11px}
+.mo-x:hover{background:rgba(255,255,255,.24)}
+.mo-s{display:flex;gap:9px;flex-wrap:wrap;padding:11px 18px;
+  border-bottom:1px solid var(--slate-100);background:var(--slate-50)}
+.pill{background:#fff;border:1px solid var(--slate-200);border-radius:8px;
+  padding:5px 10px;font-size:11.5px;color:var(--slate-600)}
+.pill b{color:var(--slate-900);font-variant-numeric:tabular-nums}
+.pill.danger{border-color:var(--rose-200);background:var(--rose-50);
+  color:var(--rose-700)}
+.pill.danger b{color:var(--rose-700)}
+
+/* ---------- États ---------- */
+.msg{padding:30px 18px;text-align:center;color:var(--slate-400);
+  font-size:13px}
+.err{margin:0;padding:12px 14px;background:var(--rose-50);
+  border:1px solid var(--rose-200);border-radius:10px;color:var(--rose-700);
+  font-size:12.5px;white-space:pre-wrap}
+.note{font-size:11.5px;color:var(--slate-400);padding:8px 14px 12px}
+.legend{display:flex;gap:8px;flex-wrap:wrap;padding:0 14px 12px}
+/* ============================================================
+   Alignement visuel sur le dashboard de suivi temps réel (app 1)
+   — mêmes tailles, rayons, ombres et couleurs que les composants
+   Header, FilterBar, Card, KpiCard, Tabs, AlertBanner,
+   DeadlineBanner et ExportBtn.
+   ============================================================ */
+:root{
+  --rose-300:#fda4af; --amber-300:#fcd34d; --amber-500:#f59e0b;
+  --amber-600:#d97706; --amber-900:#78350f; --red-600:#dc2626;
+  --red-700:#b91c1c; --red-50:#fef2f2; --emerald-100:#d1fae5;
+  --emerald-300:#6ee7b7; --slate-800:#1e293b;
+  --shadow-sm:0 1px 2px 0 rgba(0,0,0,.05);
+  --shadow-md:0 4px 6px -1px rgba(0,0,0,.1),0 2px 4px -2px rgba(0,0,0,.1);
+}
+svg.i{flex:none;display:inline-block;vertical-align:middle}
+@keyframes ping{75%,100%{transform:scale(2);opacity:0}}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- En-tête (Header.tsx) ---------- */
+header{background:linear-gradient(to right,var(--snde-800),var(--snde-700),var(--snde-600));
+  padding:16px 24px;border-bottom:1px solid var(--slate-200);box-shadow:none}
+.hwrap{max-width:1280px;gap:12px}
+.htitle{gap:12px}
+.hlogo{width:36px;height:36px;border-radius:8px;background:rgba(255,255,255,.1);
+  border:none;display:flex;align-items:center;justify-content:center}
+.htitle h1{font-size:16px;font-weight:700;line-height:1.25;letter-spacing:0}
+.htitle p{font-size:12px;color:rgba(255,255,255,.7);margin:0}
+.hright{gap:16px}
+.live{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:500;
+  letter-spacing:.025em}
+.live .pt{position:relative;display:flex;width:10px;height:10px}
+.live .pt i{position:absolute;inset:0;border-radius:50%;background:#f87171}
+.live .pt i.ping{display:none}
+.live.on .pt i{background:#34d399}
+.live.on .pt i.ping{display:block;opacity:.75;
+  animation:ping 1s cubic-bezier(0,0,.2,1) infinite}
+.hbtn{display:inline-flex;align-items:center;gap:6px;border:none;
+  border-radius:8px;background:rgba(255,255,255,.1);color:#fff;
+  padding:6px 12px;font-size:12px;font-weight:500}
+.hbtn:hover{background:rgba(255,255,255,.2)}
+.hbtn.tourne svg{animation:spin 1s linear infinite}
+.hmaj{text-align:right;font-size:11px;color:rgba(255,255,255,.75)}
+.hmaj p{margin:0}
+.hmaj .l{text-transform:uppercase;letter-spacing:.05em}
+.hmaj .v{font-weight:500;font-variant-numeric:tabular-nums;color:#fff}
+.hmaj.warn .v{color:var(--rose-200)}
+
+/* ---------- Mise en page ---------- */
+main{max-width:1280px;padding:20px 24px 60px}
+.card{border-radius:16px;box-shadow:var(--shadow-sm)}
+.card.alerte{border-color:var(--rose-200)}
+.card-h{padding:20px 20px 16px;border-bottom:none;align-items:flex-start}
+.card-t{font-size:16px;font-weight:600;text-transform:none;letter-spacing:0;
+  color:var(--slate-900)}
+.card-sub{font-size:12px;color:var(--slate-500);margin-top:2px}
+.card-b{padding:16px 20px}
+.twrap{margin:0 20px 20px;border:1px solid var(--slate-200);border-radius:8px}
+.legend{padding:0 20px 12px}
+.note{padding:0 20px 16px;font-size:12px;color:var(--slate-500)}
+.graphe{padding:4px 20px 12px}
+.g-leg{padding:0 20px 16px}
+.mo-s{margin:0 20px 12px;border:1px solid var(--slate-200);border-radius:8px}
+.msg{padding:48px 18px;font-style:italic;font-size:14px}
+.err{border-radius:12px;padding:12px 16px;font-size:14px}
+
+/* ---------- Tableaux (.table-wrap de globals.css) ---------- */
+table{font-size:14px}
+thead th{padding:8px 12px;font-size:11px;font-weight:600;letter-spacing:.05em;
+  color:var(--slate-600);border-bottom:1px solid var(--slate-100)}
+tbody td{padding:8px 12px;color:var(--slate-700)}
+
+/* ---------- Badges (rounded-full, ring-1) ---------- */
+.b{padding:2px 9px;font-size:11px}
+
+/* ---------- KPI (KpiCard.tsx) : carte blanche, seule l'icône est teintée ---------- */
+.kpis{gap:12px}
+.kpi,.kpi.danger,.kpi.good,.kpi.info,.kpi.warn{background:#fff;
+  border:1px solid var(--slate-200);border-radius:16px;padding:16px;
+  box-shadow:var(--shadow-sm);transition:box-shadow .15s}
+.kpi:hover{box-shadow:var(--shadow-md)}
+.kpi .top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.kpi .lab{font-size:11px;font-weight:600;letter-spacing:.05em;color:var(--slate-500)}
+.kpi .val,.kpi.danger .val,.kpi.good .val,.kpi.info .val,.kpi.warn .val{
+  font-size:24px;font-weight:700;color:var(--slate-900);margin-top:8px;line-height:1.3}
+.kpi .sub{font-size:12px;color:var(--slate-500);margin-top:4px}
+.kpi .ic{width:32px;height:32px;border-radius:8px;flex:none;display:inline-flex;
+  align-items:center;justify-content:center;background:var(--slate-50);
+  color:var(--slate-700);box-shadow:inset 0 0 0 1px var(--slate-200)}
+.kpi.info .ic{background:var(--snde-50);color:var(--snde-700);
+  box-shadow:inset 0 0 0 1px var(--snde-200)}
+.kpi.good .ic{background:var(--emerald-50);color:var(--emerald-700);
+  box-shadow:inset 0 0 0 1px var(--emerald-200)}
+.kpi.warn .ic{background:var(--amber-50);color:var(--amber-700);
+  box-shadow:inset 0 0 0 1px var(--amber-200)}
+.kpi.danger .ic{background:var(--rose-50);color:var(--rose-700);
+  box-shadow:inset 0 0 0 1px var(--rose-200)}
+
+/* ---------- Barre de filtres (FilterBar.tsx) ---------- */
+.fbar{display:grid;gap:12px;align-items:end;padding:16px;
+  grid-template-columns:.8fr 1fr 1.4fr 1fr 1.2fr auto}
+@media(max-width:1100px){.fbar{grid-template-columns:repeat(2,1fr)}}
+.fld>label{display:block;margin-bottom:4px;font-size:11px;font-weight:600;
+  text-transform:uppercase;letter-spacing:.05em;color:var(--slate-500)}
+.fsel{position:relative}
+.fsel select,.fsel input{width:100%;-webkit-appearance:none;appearance:none;
+  padding:8px 36px 8px 32px;font-size:14px;color:var(--slate-800);
+  background:#fff;border:1px solid var(--slate-200);border-radius:8px;
+  box-shadow:var(--shadow-sm);transition:border-color .15s}
+.fsel input{padding-right:10px}
+.fsel select:focus,.fsel input:focus{outline:none;border-color:var(--snde-500);
+  box-shadow:0 0 0 2px var(--snde-100)}
+.fsel select:disabled{background:var(--slate-50);color:var(--slate-400);
+  cursor:not-allowed}
+.fsel .fi,.fsel .fc{position:absolute;top:50%;transform:translateY(-50%);
+  color:var(--slate-400);pointer-events:none}
+.fsel .fi{left:10px}
+.fsel .fc{right:10px}
+.freset{height:38px;display:inline-flex;align-items:center;justify-content:center;
+  gap:6px;padding:0 14px;font-size:14px;font-weight:500;color:var(--slate-600);
+  background:var(--slate-50);border:1px solid var(--slate-200);border-radius:8px}
+.freset:hover{background:var(--slate-100)}
+
+/* ---------- Onglets (page.tsx) ---------- */
+.tabs{border-radius:12px;padding:6px;gap:4px;box-shadow:var(--shadow-sm)}
+.tabs button{border-radius:8px;padding:8px 14px;font-size:14px;font-weight:500;
+  gap:8px;color:var(--slate-600)}
+.tabs button:hover{background:var(--slate-50)}
+.tabs button.on,.tabs button.on:hover{background:var(--snde-600);color:#fff;
+  box-shadow:var(--shadow-sm)}
+.tabs button.al-rose{color:var(--rose-700)}
+.tabs button.al-rose:hover{background:var(--rose-50)}
+.tabs button.al-rose.on{background:var(--rose-600);color:#fff}
+.tabs button.al-red{color:var(--red-700)}
+.tabs button.al-red:hover{background:var(--red-50)}
+.tabs button.al-red.on{background:var(--red-600);color:#fff}
+.tabs .cnt{display:inline-flex;align-items:center;justify-content:center;
+  height:20px;min-width:20px;padding:0 6px;margin-left:4px;font-size:10px;
+  font-weight:700;border-radius:999px;background:var(--slate-200);
+  color:var(--slate-700)}
+.tabs button.on .cnt{background:rgba(255,255,255,.3);color:#fff}
+.tabs .cnt.danger,.tabs .cnt.warn{background:var(--slate-200);color:var(--slate-700)}
+.tabs button.al-rose .cnt{background:var(--rose-500);color:#fff}
+.tabs button.al-rose.on .cnt{background:#fff;color:var(--rose-700)}
+.tabs button.al-red .cnt{background:#ef4444;color:#fff}
+.tabs button.al-red.on .cnt{background:#fff;color:var(--red-700)}
+
+/* ---------- Bouton Excel (ExportBtn de PageShared.tsx) ---------- */
+button.xls{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;
+  font-size:12px;font-weight:500;border-radius:8px;
+  border:1px solid var(--emerald-200);background:var(--emerald-50);
+  color:var(--emerald-700)}
+button.xls:hover{background:var(--emerald-100);border-color:var(--emerald-300)}
+
+/* ---------- Bandeaux (AlertBanner.tsx / DeadlineBanner.tsx) ---------- */
+#bandeau,#bandeau-retard{position:static}
+.bandeau-in,.bandeau-jaune{color:inherit;padding:12px 16px;border-radius:12px;
+  box-shadow:var(--shadow-sm)}
+.bandeau-in{background:linear-gradient(to right,var(--rose-50),var(--rose-100));
+  border:2px solid var(--rose-300)}
+.bandeau-jaune{background:linear-gradient(to right,var(--amber-50),var(--amber-100));
+  border:2px solid var(--amber-300)}
+.bandeau-wrap{max-width:none;gap:12px}
+.bandeau-txt{gap:12px}
+.bandeau-ic{width:36px;height:36px;border-radius:50%;color:#fff;
+  display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow-md)}
+.bandeau-in .bandeau-ic{background:var(--rose-500)}
+.bandeau-jaune .bandeau-ic{background:var(--amber-500)}
+.bandeau-txt b{font-size:14px;font-weight:700}
+.bandeau-txt p{font-size:12px;margin:0}
+.bandeau-in .bandeau-txt b{color:var(--rose-900)}
+.bandeau-in .bandeau-txt p{color:var(--rose-700)}
+.bandeau-jaune .bandeau-txt b{color:var(--amber-900)}
+.bandeau-jaune .bandeau-txt p{color:var(--amber-700)}
+.bandeau-act{align-items:center}
+.bandeau-act button.go{display:inline-flex;align-items:center;gap:6px;
+  border:none;border-radius:8px;padding:8px 14px;font-size:14px;
+  font-weight:600;color:#fff;box-shadow:var(--shadow-sm)}
+.bandeau-in .bandeau-act button.go{background:var(--rose-600);color:#fff}
+.bandeau-in .bandeau-act button.go:hover{background:var(--rose-700)}
+.bandeau-jaune .bandeau-act button.go{background:var(--amber-600);color:#fff}
+.bandeau-jaune .bandeau-act button.go:hover{background:var(--amber-700)}
+/* Centres et secteurs côte à côte (onglets Baisses et Gros consommateurs) */
+.cote{display:grid;grid-template-columns:minmax(300px,2fr) minmax(0,3fr);
+  gap:16px;align-items:start;margin-bottom:18px}
+.cote>.card{margin-top:0;margin-bottom:0;min-width:0}
+.cote .twrap{max-height:70vh}
+.cote th,.cote td{padding-left:8px;padding-right:8px}
+tbody tr.sel td{background:#e3eefb;font-weight:600}
+@media(max-width:1100px){.cote{grid-template-columns:1fr}}
+/* Interface épurée : pas de sous-titres ni de notes explicatives */
+.card-sub,.note,#hsub{display:none !important}
+/* Panneaux Centres / Secteurs — style épuré */
+main{max-width:1600px}
+.cote{grid-template-columns:minmax(300px,1fr) minmax(0,2.3fr);align-items:stretch;gap:20px}
+.cote>.card{display:flex;flex-direction:column;border:1px solid var(--slate-200);
+  box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.cote .card-h{padding:18px 20px 10px}
+.cote .card-t{font-size:15px;font-weight:600;letter-spacing:-.01em}
+.cote .twrap{flex:1;max-height:72vh;margin:0 12px 12px;border:0;border-radius:10px}
+.cote table{width:100%;border-collapse:separate;border-spacing:0}
+.cote thead th{position:sticky;top:0;z-index:1;background:#fff;color:var(--slate-500);
+  font-size:11px;font-weight:600;letter-spacing:.04em;border-bottom:1px solid var(--slate-200)}
+.cote tbody td{background:transparent !important;border-bottom:1px solid var(--slate-100);
+  padding-top:11px;padding-bottom:11px}
+.cote tbody tr{background:transparent !important;transition:background .12s}
+.cote tbody tr:hover td{background:var(--slate-50) !important}
+.cote tbody tr.sel td{background:#eef4ff !important}
+.cote tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--snde-500,#1565A0)}
+.cote tbody tr:last-child td{border-bottom:0}
+.cote .b{border-radius:999px;font-weight:600}
+#legend{display:none}
+.pastille{display:inline-block;min-width:24px;padding:2px 9px;border-radius:999px;
+  font-size:12px;font-weight:600;text-align:center;background:var(--slate-100);color:var(--slate-500)}
+.pastille.on{background:#fde8ec;color:#be123c}
+.tabs .cnt:empty{display:none}
+/* Choix du secteur : centres à gauche, cartes de secteurs à droite */
+.ch-grid{display:grid;grid-template-columns:260px minmax(0,1fr);gap:24px}
+.ch-centres{display:flex;flex-direction:column;gap:2px;max-height:66vh;overflow:auto;
+  padding-right:12px;border-right:1px solid var(--slate-100)}
+.ch-centre{display:flex;justify-content:space-between;align-items:center;gap:8px;text-align:left;
+  border:0;background:transparent;padding:9px 12px;border-radius:8px;font-size:13px;
+  color:var(--slate-700);cursor:pointer}
+.ch-centre:hover{background:var(--slate-50)}
+.ch-centre.on{background:#eef4ff;color:var(--snde-500);font-weight:600;
+  box-shadow:inset 3px 0 0 var(--snde-500)}
+.ch-sects{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
+.ch-sect{display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;
+  border:1px solid var(--slate-200);background:#fff;border-radius:12px;padding:14px 16px;
+  cursor:pointer;transition:border-color .12s,box-shadow .12s}
+.ch-sect:hover{border-color:var(--snde-500);box-shadow:0 4px 12px rgba(21,101,160,.12)}
+.ch-num{font-size:22px;font-weight:700;color:var(--slate-800);line-height:1}
+.ch-lib{font-size:12px;color:var(--slate-500);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;max-width:100%}
+.ch-vide{color:var(--slate-400);font-size:13px;padding:24px 0}
+@media(max-width:900px){.ch-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hwrap">
+    <div class="htitle">
+      <div class="hlogo"><svg class="i" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+      <div>
+        <h1>SNDE — Alerte Baisse de Facturation</h1>
+        <p id="hsub">Volume facturé comparé au cycle N-2 — même parité de relève</p>
+      </div>
+    </div>
+    <div class="hright">
+      <div class="live" id="chip-sse">
+        <span class="pt"><i class="ping"></i><i></i></span>
+        <span>HORS LIGNE</span>
+      </div>
+      <button class="hbtn" id="btn-refresh"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><span>Rafraîchir</span></button>
+      <div class="hmaj" id="hmaj">
+        <p class="l">Dernière maj</p>
+        <p class="v" id="chip-maj">—</p>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- Bandeau rouge : visible tant que les alertes ne sont pas consultées -->
+  <div id="bandeau" role="alert" aria-live="polite">
+    <div class="bandeau-in">
+      <div class="bandeau-wrap">
+        <div class="bandeau-txt">
+          <div class="bandeau-ic"><svg class="i" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></div>
+          <div>
+            <b id="band-t">—</b>
+            <p id="band-s">—</p>
+          </div>
+        </div>
+        <div class="bandeau-act">
+          <button class="xls" id="band-xls"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/></svg><span>Excel</span></button>
+          <button class="go" id="band-voir">Consulter les alertes<svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bandeau jaune : retards de facturation non consultés -->
+  <div id="bandeau-retard" role="alert" aria-live="polite">
+    <div class="bandeau-jaune">
+      <div class="bandeau-wrap">
+        <div class="bandeau-txt">
+          <div class="bandeau-ic"><svg class="i" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+          <div>
+            <b id="bandr-t">—</b>
+            <p id="bandr-s">—</p>
+          </div>
+        </div>
+        <div class="bandeau-act">
+          <button class="xls" id="bandr-xls"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/></svg><span>Excel</span></button>
+          <button class="go" id="bandr-voir">Consulter les retards<svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="zone-err"></div>
+
+  <!-- Filtres globaux, partagés par les quatre onglets -->
+  <section class="card">
+    <div class="fbar">
+      <div class="fld">
+        <label for="sel-annee">Année</label>
+        <div class="fsel"><svg class="i fi" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg><select id="sel-annee"></select><svg class="i fc" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+      </div>
+      <div class="fld">
+        <label for="sel-cycle">Cycle</label>
+        <div class="fsel"><svg class="i fi" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg><select id="sel-cycle"></select><svg class="i fc" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+      </div>
+      <div class="fld">
+        <label for="sel-zone">Zone</label>
+        <div class="fsel"><select id="sel-zone" style="padding-left:12px">
+          <option value="">Toutes les zones</option>
+          <option value="2">Nouakchott</option>
+          <option value="3">Nouadhibou</option>
+          <option value="1">Intérieur</option>
+        </select><svg class="i fc" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+      </div>
+      <div class="fld">
+        <label for="sel-centre">Centre</label>
+        <div class="fsel"><svg class="i fi" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg><select id="sel-centre"><option value="">Tous les centres</option></select><svg class="i fc" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+      </div>
+      <div class="fld">
+        <label for="sel-secteur">Secteur</label>
+        <div class="fsel"><svg class="i fi" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg><select id="sel-secteur"><option value="">Tous les secteurs</option></select><svg class="i fc" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+      </div>
+      <div class="fld">
+        <label for="in-q">Recherche</label>
+        <div class="fsel"><svg class="i fi" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><input type="search" id="in-q" placeholder="Rechercher…"></div>
+      </div>
+      <button type="button" class="freset" id="btn-reset"><svg class="i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg><span>Réinitialiser</span></button>
+    </div>
+  </section>
+
+  <!-- Onglets -->
+  <div class="tabs" id="tabs">
+    <button data-v="baisses" class="on"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/></svg>Baisses de facturation
+      <span class="cnt danger" id="cnt-baisses">0</span></button>
+    <button data-v="gros"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="8"/><rect x="12" y="6" width="3" height="12"/><rect x="17" y="13" width="3" height="5"/></svg>Gros consommateurs
+      <span class="cnt danger" id="cnt-gros">0</span></button>
+    <button data-v="avancement" style="display:none"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>Avancement de la saisie
+      <span class="cnt" id="cnt-avancement">0</span></button>
+    <button data-v="abonnes"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Détail par abonné
+      <span class="cnt" id="cnt-abonnes">0</span></button>
+    <button data-v="retards"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Retards de planification
+      <span class="cnt warn" id="cnt-retards">0</span></button>
+  </div>
+
+  <!-- ====================================================== -->
+  <!-- VUE 1 — BAISSES                                        -->
+  <!-- ====================================================== -->
+  <div class="vue on" id="v-baisses">
+
+    <section class="card alerte" id="card-alertes" style="display:none">
+      <div class="card-h">
+        <div>
+          <p class="card-t">Journal des alertes de baisse</p>
+          <p class="card-sub" id="sub-alertes">—</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <label class="switch">
+            <input type="checkbox" id="cb-nonlues"> Non consultées seulement
+          </label>
+          <button class="xls" id="btn-xls-alertes"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/></svg><span>Excel</span></button>
+          <button class="xls" id="btn-ab-alertes"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><span>Abonnés en baisse</span></button>
+          <button id="btn-fermer-alertes">Masquer</button>
+        </div>
+      </div>
+      <div class="twrap" id="w-alertes" style="max-height:44vh">
+        <div class="msg">Chargement…</div>
+      </div>
+    </section>
+
+    <section class="kpis" id="kpis"></section>
+
+    <section class="card">
+      <div class="card-b bar">
+        <label class="switch">
+          <input type="checkbox" id="cb-toutes"> Afficher aussi les hausses
+        </label>
+        <button class="xls" id="btn-xls" style="margin-left:auto"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/></svg><span>Excel</span></button>
+      </div>
+    </section>
+
+    <div class="cote">
+    <section class="card">
+      <div class="card-h">
+        <div>
+          <p class="card-t">Centres</p>
+          <p class="card-sub" id="sub-centres">—</p>
+        </div>
+      </div>
+      <div class="twrap" id="w-centres"><div class="msg">Chargement…</div></div>
+    </section>
+
+    <section class="card">
+      <div class="card-h">
+        <div>
+          <p class="card-t" id="t-secteurs">Secteurs en baisse</p>
+          <p class="card-sub" id="sub-secteurs">—</p>
+        </div>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="twrap" id="w-secteurs"><div class="msg">Chargement…</div></div>
+      <p class="note" id="note-prov" style="display:none"></p>
+    </section>
+    </div>
+  </div>
+
+  <!-- ====================================================== -->
+  <!-- VUE 1 bis — GROS CONSOMMATEURS (facturation mensuelle) -->
+  <!-- ====================================================== -->
+  <div class="vue" id="v-gros">
+
+
+    <section class="kpis" id="kpis-g"></section>
+
+    <section class="card">
+      <div class="card-b bar">
+        <label class="switch">
+          <input type="checkbox" id="cb-toutes-g"> Afficher aussi les hausses
+        </label>
+        <button class="xls" id="btn-xls-g" style="margin-left:auto"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/></svg><span>Excel</span></button>
+      </div>
+    </section>
+
+    <div class="cote">
+    <section class="card">
+      <div class="card-h">
+        <div>
+          <p class="card-t">Centres — gros consommateurs</p>
+          <p class="card-sub" id="sub-g-centres">—</p>
+        </div>
+      </div>
+      <div class="twrap" id="w-g-centres"><div class="msg">Chargement…</div></div>
+    </section>
+
+    <section class="card">
+      <div class="card-h">
+        <div>
+          <p class="card-t" id="t-g-secteurs">Gros consommateurs en baisse</p>
+          <p class="card-sub" id="sub-g-secteurs">—</p>
+        </div>
+      </div>
+      <div class="twrap" id="w-g-secteurs"><div class="msg">Chargement…</div></div>
+      <p class="note" id="note-prov-g" style="display:none"></p>
+    </section>
+    </div>
+  </div>
+
+  <!-- ====================================================== -->
+  <!-- VUE 2 — AVANCEMENT DE LA SAISIE                        -->
+  <!-- ====================================================== -->
+  <div class="vue" id="v-avancement">
+
+    <section class="kpis" id="kpis-av"></section>
+
+    <section class="card">
+      <div class="card-b bar">
+        <label class="fl" for="sel-etat">État</label>
+        <select id="sel-etat">
+          <option value="">Tous les états</option>
+          <option value="NON_COMMENCE">Non commencé</option>
+          <option value="EN_COURS">Saisie en cours</option>
+          <option value="SAISIE_FINIE">Saisie finie</option>
+          <option value="CLOTURE">Clôturé</option>
+          <option value="FACTURE">Facturé</option>
+        </select>
+        <button class="xls" id="btn-xls-av" style="margin-left:auto"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/></svg><span>Excel</span></button>
+      </div>
+    </section>
+
+    <section class="card" id="card-jours" style="display:none">
+      <div class="card-h">
+        <div>
+          <p class="card-t">Progression quotidienne de la saisie</p>
+          <p class="card-sub" id="sub-jours">—</p>
+        </div>
+        <button id="btn-fermer-jours">Masquer</button>
+      </div>
+      <div class="graphe" id="w-jours"><div class="msg">Chargement…</div></div>
+      <div class="g-leg">
+        <span><i style="background:var(--snde-300)"></i>compteurs relevés dans la journée</span>
+        <span><i style="background:var(--rose-600)"></i>cumul en % du parc</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-h">
+        <div>
+          <p class="card-t">Avancement par secteur</p>
+          <p class="card-sub" id="sub-avancement">—</p>
+        </div>
+        <span class="mut" style="font-size:11.5px">Clic = progression jour par jour</span>
+      </div>
+      <div class="legend" id="legend-av"></div>
+      <div class="twrap" id="w-avancement"><div class="msg">Chargement…</div></div>
+      <p class="note" id="note-av"></p>
+    </section>
+  </div>
+
+  <!-- ====================================================== -->
+  <!-- VUE 3 — RETARDS DE FACTURATION                         -->
+  <!-- ====================================================== -->
+  <div class="vue" id="v-retards">
+
+    <section class="kpis" id="kpis-rt"></section>
+
+    <section class="card alerte" id="card-al-retard" style="display:none">
+      <div class="card-h">
+        <div>
+          <p class="card-t">Journal des alertes de retard</p>
+          <p class="card-sub" id="sub-al-retard">—</p>
+        </div>
+        <button id="btn-fermer-al-retard">Masquer</button>
+      </div>
+      <div class="twrap" id="w-al-retard" style="max-height:40vh">
+        <div class="msg">Chargement…</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-b bar">
+        <div class="chips" id="chips-rt"></div>
+        <button class="xls" id="btn-xls-rt" style="margin-left:auto"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/></svg><span>Excel</span></button>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-h">
+        <div>
+          <p class="titre-retard" id="titre-retards">—</p>
+        </div>
+      </div>
+      <div class="twrap" id="w-retards"><div class="msg">Chargement…</div></div>
+    </section>
+  </div>
+
+  <!-- ====================================================== -->
+  <!-- VUE 4 — DÉTAIL PAR ABONNÉ                              -->
+  <!-- ====================================================== -->
+  <div class="vue" id="v-abonnes">
+
+    <section class="card" id="card-choix" style="display:none">
+      <div class="card-b">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+          <p class="card-t" style="margin:0">Choisir un secteur</p>
+        </div>
+        <p class="card-sub" style="margin:0 0 10px">
+          Le détail par abonné porte sur un secteur à la fois. Choisis-le
+          dans le filtre « Secteur » ci-dessus, ou clique une ligne dans
+          l'un des deux autres onglets.
+        </p>
+        <div id="w-choix"></div>
+      </div>
+    </section>
+
+    <section class="card" id="card-liste-baisse" style="display:none">
+      <div class="card-h">
+        <div><p class="card-t" id="t-liste-baisse">Abonnés en baisse</p></div>
+        <button id="btn-retour-liste" style="margin-left:auto;margin-right:8px">← Retour</button>
+        <button class="xls" id="btn-xls-liste"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg><span>Télécharger Excel</span></button>
+      </div>
+      <div class="pills" id="pills-liste" style="padding:0 20px 10px"></div>
+      <div class="twrap" id="w-liste-baisse" style="max-height:66vh">
+        <div class="msg">Chargement…</div>
+      </div>
+    </section>
+
+    <section class="card" id="card-ab" style="display:none">
+      <div class="card-h">
+        <div>
+          <p class="card-t" id="t-ab">—</p>
+          <p class="card-sub" id="sub-ab">—</p>
+        </div>
+        <button class="xls" id="btn-voir-baisses-ab" style="margin-left:auto;margin-right:8px"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><span>Abonnés en baisse</span></button>
+        <button id="btn-retour-ab" style="margin-right:8px">← Changer de secteur</button>
+        <button class="xls" id="btn-xls-ab"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/></svg><span>Excel</span></button>
+      </div>
+      <div class="mo-s" id="pills-ab"></div>
+      <section class="card-b bar" style="border-bottom:1px solid var(--slate-100)">
+        <label class="fl" for="sel-statut" style="display:none">Statut de saisie</label>
+        <select id="sel-statut" style="display:none">
+          <option value="">Tous</option>
+          <option value="NON_RELEVE">Non relevé</option>
+          <option value="RELEVE">Relevé, facture à venir</option>
+          <option value="FACTURE">Facturé</option>
+          <option value="HORS_PARC">Hors parc</option>
+        </select>
+        <label class="switch">
+          <input type="checkbox" id="cb-ab-baisse"> En baisse seulement
+        </label>
+      </section>
+      <div class="twrap" id="w-ab" style="max-height:66vh">
+        <div class="msg">Chargement…</div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+"use strict";
+
+/* ============================================================
+   Formatage
+   ============================================================ */
+const NF0 = new Intl.NumberFormat("fr-FR", {maximumFractionDigits: 0});
+const NF1 = new Intl.NumberFormat("fr-FR", {minimumFractionDigits: 1,
+                                            maximumFractionDigits: 1});
+function n0(v){ return (v===null||v===undefined||isNaN(v)) ? "—" : NF0.format(v); }
+function n1(v){ return (v===null||v===undefined||isNaN(v)) ? "—" : NF1.format(v); }
+function pc(v){ return (v===null||v===undefined||isNaN(v)) ? "—" : NF1.format(v)+" %"; }
+function esc(s){
+  return String(s===null||s===undefined ? "" : s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
+function hm(s){
+  if(!s) return "—";
+  const d = new Date(s);
+  if(isNaN(d)) return String(s).slice(0,16).replace("T"," ");
+  return d.toLocaleString("fr-FR",
+    {day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+}
+function jour(s){
+  if(!s) return "—";
+  const d = new Date(s);
+  if(isNaN(d)) return String(s).slice(0,10);
+  return d.toLocaleDateString("fr-FR", {day:"2-digit", month:"2-digit"});
+}
+function sgn(v, fmt){
+  if(v===null||v===undefined||isNaN(v)) return '<span class="mut">—</span>';
+  const t = (v>0?"+":"") + fmt(v);
+  const c = v<0 ? "neg" : v>0 ? "pos" : "mut";
+  return '<span class="'+c+'">'+t+'</span>';
+}
+
+
+/* ============================================================
+   Icônes (tracés Lucide, comme le dashboard) et carte KPI
+   ============================================================ */
+const ICO = {activity:'<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>', alert:'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>', clock:'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>', down:'<polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/>', up:'<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>', refresh:'<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>'};
+function ico(nom, t){
+  return '<svg class="i" width="'+t+'" height="'+t+'" viewBox="0 0 24 24" '
+    + 'fill="none" stroke="currentColor" stroke-width="2" '
+    + 'stroke-linecap="round" stroke-linejoin="round">'+ICO[nom]+"</svg>";
+}
+/* Carte KPI au format KpiCard.tsx : carte blanche, icône teintée. */
+const KPI_ICONE = {info:"up", danger:"down", good:"activity",
+                   warn:"clock", "":"activity"};
+function kpiCarte(c){
+  return '<div class="kpi '+(c.cls||"")+'"><div class="top">'
+    + '<div class="lab">'+esc(c.lab)+'</div>'
+    + '<span class="ic">'+ico(KPI_ICONE[c.cls||""]||"activity", 16)+"</span></div>"
+    + '<div class="val">'+c.val+'</div>'
+    + '<div class="sub">'+c.sub+"</div></div>";
+}
+
+const LIB_GRAVITE = {
+  FORTE:"Baisse forte", MOYENNE:"Baisse", LEGERE:"Baisse légère",
+  DISPARU:"Plus facturé", VOLUME_NUL:"Facturé à 0 m³",
+  NON_RELEVE:"Pas encore relevé", EN_ATTENTE_FACT:"Relevé, facture à venir",
+  ESTIMEE:"Facturé en estimé",
+  NOUVEAU:"Nouveau", STABLE:"Stable",
+  HAUSSE:"Hausse", VIDE:"Aucun volume"
+};
+const LIB_ETAT = {
+  FACTURE:"Facturé", CLOTURE:"Clôturé", SAISIE_FINIE:"Saisie finie",
+  EN_COURS:"Saisie en cours", NON_COMMENCE:"Non commencé",
+  ABSENT:"Absent du cycle"
+};
+const LIB_URGENCE = {
+  EN_RETARD:"Deadline dépassée", DEADLINE_PROCHE:"Deadline proche",
+  A_TEMPS:"Dans les délais",
+  A_FACTURER:"À facturer",
+  A_FACTURER_EN_RETARD:"À facturer, date dépassée",
+  FACTURE:"Facturé",
+  FACTURE_EN_RETARD:"Facturé après la date",
+  PAS_DE_PLANNING:"Sans planning"
+};
+const LIB_SAISIE = {
+  NON_RELEVE:"Non relevé", RELEVE:"Relevé", FACTURE:"Facturé",
+  HORS_PARC:"Hors parc"
+};
+function bGravite(g){
+  return '<span class="b b-'+esc(g)+'">'+esc(LIB_GRAVITE[g]||g)+'</span>';
+}
+function bEtat(e){
+  return '<span class="b b-et '+esc(e)+'">'+esc(LIB_ETAT[e]||e)+'</span>';
+}
+function bSaisie(x){
+  return '<span class="b b-sa '+esc(x)+'">'+esc(LIB_SAISIE[x]||x)+'</span>';
+}
+function bUrgence(u){
+  return '<span class="b b-ur '+esc(u)+'">'+esc(LIB_URGENCE[u]||u)+'</span>';
+}
+/* Retard en jours : positif = dépassé, négatif = il reste du temps. */
+function retardTxt(j){
+  if(j===null||j===undefined||isNaN(j)) return '<span class="mut">—</span>';
+  if(j > 0) return '<span class="neg">+'+n0(j)+' j</span>';
+  if(j === 0) return '<span class="neg">aujourd\'hui</span>';
+  return '<span class="mut">'+n0(j)+' j</span>';
+}
+/* Barre d'avancement : verte à 100 %, ambre sous 50 %. */
+function barre(p){
+  if(p===null||p===undefined||isNaN(p)) return '<span class="mut">—</span>';
+  const v = Math.max(0, Math.min(100, p));
+  const cls = v >= 100 ? "full" : v < 50 ? "low" : "";
+  return '<span class="pbw"><span class="track"><i class="'+cls
+    + '" style="width:'+v+'%"></i></span><span>'+n0(p)+' %</span></span>';
+}
+
+/* ============================================================
+   État
+   ============================================================ */
+const S = {
+  vue: "baisses",
+  cycles: [], annees: [], annee: null, cycle: null,
+  synthese: null, centres: [], secteurs: [], alertes: [],
+  centresListe: [], secteursListe: [],
+  avancement: [], jours: null, abonnes: null,
+  retards: [], alertesRetard: [], filtreRt: "A_TRAITER", nbRetardNonLus: 0,
+  triR: {col:"jours_retard", dir:-1}, triAR: {col:"jours_retard", dir:-1},
+  centre: "", secteur: "", q: "", zone: "",
+  minPct: 0, toutes: false, nonLues: false, etatAv: "",
+  statutAb: "", abBaisse: false,
+  triS: {col:"ecart", dir:1}, triC: {col:"ecart", dir:1},
+  triA: {col:"ecart", dir:1}, triV: {col:"pct_declare", dir:1},
+  triB: {col:"ecart", dir:1},
+  gSynthese: null, gCentres: [], gSecteurs: [], gNb: 0,
+  gMin: 0, gToutes: false,
+  triGC: {col:"ecart", dir:1}, triGS: {col:"ecart", dir:1},
+  nbNonLues: 0
+};
+
+/* Pendant une actualisation automatique, on ne vide pas les tableaux
+   (« Chargement… ») : les données sont remplacées sur place. */
+function attente(id){
+  if(S.silence) return;
+  const el = document.getElementById(id);
+  if(el) el.innerHTML = '<div class="msg">Chargement…</div>';
+}
+
+async function jget(url){
+  const r = await fetch(url, {cache:"no-store"});
+  if(!r.ok){
+    let d = r.status + " " + r.statusText;
+    try { const j = await r.json(); if(j.detail) d = j.detail; } catch(e){}
+    throw new Error(d);
+  }
+  return r.json();
+}
+async function jpost(url){
+  const r = await fetch(url, {method:"POST", cache:"no-store"});
+  if(!r.ok){
+    let d = r.status + " " + r.statusText;
+    try { const j = await r.json(); if(j.detail) d = j.detail; } catch(e){}
+    throw new Error(d);
+  }
+  return r.json();
+}
+function erreur(msg){
+  document.getElementById("zone-err").innerHTML =
+    msg ? '<p class="err">'+esc(msg)+'</p>' : "";
+}
+function qsCycle(extra){
+  const p = new URLSearchParams({cycle:S.cycle});
+  if(S.centre) p.set("str_id", S.centre);
+  if(S.zone) p.set("zone", S.zone);
+  if(extra) for(const k in extra) p.set(k, extra[k]);
+  return p;
+}
+
+/* ============================================================
+   Tri générique
+   ============================================================ */
+function trier(rows, tri){
+  const {col, dir} = tri;
+  return rows.slice().sort((a,b)=>{
+    let x = a[col], y = b[col];
+    if(x===null||x===undefined) return 1;
+    if(y===null||y===undefined) return -1;
+    if(typeof x === "number" && typeof y === "number") return (x-y)*dir;
+    return String(x).localeCompare(String(y), "fr") * dir;
+  });
+}
+function entetes(cols, tri, prefixe){
+  return "<thead><tr>" + cols.map(c=>{
+    if(c.nosort) return '<th class="nosort'+(c.num?" num":"")+'">'+esc(c.lab)+"</th>";
+    const fl = tri.col===c.k ? (tri.dir===1?"▲":"▼") : "";
+    return '<th data-'+prefixe+'="'+esc(c.k)+'"'+(c.num?' class="num"':"")+'>'
+      + esc(c.lab) + (fl?' <span class="ar">'+fl+"</span>":"") + "</th>";
+  }).join("") + "</tr></thead>";
+}
+function brancherTri(racine, prefixe, tri, redraw){
+  racine.querySelectorAll("th[data-"+prefixe+"]").forEach(th=>{
+    th.onclick = ()=>{
+      const k = th.getAttribute("data-"+prefixe);
+      if(tri.col===k) tri.dir = -tri.dir; else { tri.col = k; tri.dir = 1; }
+      redraw();
+    };
+  });
+}
+function filtreTexte(rows, champs){
+  const q = S.q.trim().toLowerCase();
+  if(!q) return rows;
+  return rows.filter(r=> champs.some(c=>
+    String(r[c]===null||r[c]===undefined ? "" : r[c]).toLowerCase().includes(q)
+  ));
+}
+
+/* ============================================================
+   Onglets
+   ============================================================ */
+function ouvrirVue(v){
+  S.vue = v;
+  document.querySelectorAll(".tabs button").forEach(b=>{
+    b.classList.toggle("on", b.getAttribute("data-v") === v);
+  });
+  ["baisses","gros","avancement","retards","abonnes"].forEach(x=>{
+    document.getElementById("v-"+x).classList.toggle("on", x === v);
+  });
+  if(v === "gros" && !S.gSynthese) chargerGros();
+  if(v === "avancement" && !S.avancement.length) chargerAvancement();
+  if(v === "retards" && !S.retards.length) chargerRetards();
+  if(v === "abonnes") chargerAbonnes();
+}
+
+function majCompteurs(){
+  document.getElementById("cnt-baisses").textContent =
+    S.synthese ? n0(S.synthese.nb_en_baisse) : "0";
+  const nbGros = S.gSynthese ? (S.gSynthese.nb_en_baisse||0) : (S.gNb||0);
+  document.getElementById("cnt-gros").textContent = n0(nbGros);
+  document.querySelector('.tabs button[data-v="gros"]').classList.toggle(
+    "al-rose", nbGros > 0);
+  const enCours = S.avancement.filter(
+    r=> r.etat === "EN_COURS" || r.etat === "NON_COMMENCE").length;
+  document.getElementById("cnt-avancement").textContent =
+    S.avancement.length ? n0(enCours) : "0";
+  const aTraiter = ["EN_RETARD", "DEADLINE_PROCHE"];
+  const nbRt = S.retards.length
+    ? S.retards.filter(r=>aTraiter.includes(r.urgence)).length
+    : (S.rtNb||0);
+  const nbRtRetard = S.retards.length
+    ? S.retards.filter(r=>r.urgence === "EN_RETARD").length
+    : (S.rtRetard||0);
+  document.getElementById("cnt-retards").textContent = n0(nbRt);
+  document.getElementById("cnt-abonnes").textContent =
+    S.abonnes ? n0(S.abonnes.resume.nb_abonnes) : "";
+  /* Onglet en couleur d'alerte quand il y a quelque chose, comme les
+     onglets Alertes et Retards du dashboard. */
+  document.querySelector('.tabs button[data-v="baisses"]').classList.toggle(
+    "al-rose", !!(S.synthese && S.synthese.nb_en_baisse > 0));
+  document.querySelector('.tabs button[data-v="retards"]').classList.toggle(
+    "al-red", nbRtRetard > 0);
+}
+
+/* ============================================================
+   Bandeau d'alerte — ne disparaît qu'une fois consulté
+   ============================================================ */
+const MOIS_LIB = ["janvier","février","mars","avril","mai","juin","juillet",
+  "août","septembre","octobre","novembre","décembre"];
+function cleMoisCourant(){
+  const d = new Date();
+  return d.getFullYear() * 100 + (d.getMonth() + 1);
+}
+
+async function majBandeau(flash){
+  /* Toutes les alertes du MOIS EN COURS, tous centres confondus, quel que
+     soit le cycle ou le centre affiché ; consultées ou non : le bandeau
+     reste visible, seul le nombre de non consultées diminue. */
+  let c, nonLues = 0;
+  const cm = cleMoisCourant();
+  const q = "&cycle=" + cm;
+  try{
+    c = await jget("/api/alertes/count?only_unack=false" + q);
+    nonLues = (await jget("/api/alertes/count?only_unack=true" + q)).n || 0;
+  }catch(e){ return; }
+
+  const avant = S.nbNonLues || 0;
+  S.nbNonLues = nonLues;
+  const el = document.getElementById("bandeau");
+  const total = c.n || 0;
+
+  if(total > 0){
+    document.getElementById("band-t").textContent =
+      total + (total > 1 ? " secteurs en baisse de facturation"
+                         : " secteur en baisse de facturation")
+      + " — " + MOIS_LIB[cm % 100 - 1] + " " + Math.floor(cm / 100)
+      + " · " + (nonLues ? n0(nonLues) + " non consultée(s)" : "toutes consultées");
+    document.getElementById("band-s").textContent =
+      n0(c.volume_perdu) + " m³ perdus · " + n0(c.nb_centres)
+      + " centre(s) · " + n0(c.nb_forte) + " baisse(s) forte(s)"
+      + (c.derniere ? " · dernière détection " + hm(c.derniere) : "");
+    el.classList.add("on");
+    if(flash || nonLues > avant){
+      el.classList.remove("flash");
+      void el.offsetWidth;
+      el.classList.add("flash");
+    }
+  }else{
+    el.classList.remove("on", "flash");
+  }
+}
+
+async function consulterAlertes(){
+  const b = document.getElementById("band-voir");
+  b.disabled = true;
+  try{
+    /* Le bandeau compte le mois en cours, tous centres : le journal
+       s'ouvre donc sur ce cycle, sans filtre de centre. */
+    const cm = cleMoisCourant();
+    if(S.cycle !== cm && S.cycles.some(c=>c.cycle_key === cm)){
+      S.annee = Math.floor(cm / 100);
+      document.getElementById("sel-annee").value = String(S.annee);
+      S.cycle = cm;
+      remplirCyclesDeLAnnee();
+      document.getElementById("sel-cycle").value = String(cm);
+      S.centre = ""; S.secteur = "";
+      await chargerListes();
+      S.avancement = []; S.retards = []; S.abonnes = null; S.gSynthese = null;
+      chargerTout();
+    }else if(S.centre){
+      S.centre = ""; S.secteur = "";
+      document.getElementById("sel-centre").value = "";
+      await chargerSecteursListe();
+      chargerTout();
+    }
+    ouvrirVue("baisses");
+    await ouvrirAlertes();
+    document.getElementById("card-alertes").scrollIntoView({behavior:"smooth"});
+  }catch(e){
+    erreur("Échec de l'acquittement : " + e.message);
+  }finally{
+    b.disabled = false;
+  }
+}
+
+/* ============================================================
+   Journal des alertes
+   ============================================================ */
+const COLS_A = [
+  {k:"centre_libelle", lab:"Centre"},
+  {k:"secteur_num", lab:"N°"},
+  {k:"secteur_libelle", lab:"Secteur"},
+  {k:"cycle", lab:"Cycle"},
+  {k:"etat", lab:"État"},
+  {k:"vol_total_p", lab:"Vol. total N-2", num:true},
+  {k:"vol_total_n", lab:"Vol. total N", num:true},
+  {k:"ecart_total", lab:"Écart total m³", num:true},
+  {k:"ecart_total_pct", lab:"Écart total %", num:true},
+  {k:"vol_p", lab:"Vol. comparé N-2", num:true},
+  {k:"vol_n", lab:"Vol. comparé N", num:true},
+  {k:"ecart", lab:"Écart comparé m³", num:true},
+  {k:"ecart_pct", lab:"Écart comparé %", num:true},
+  {k:"gravite", lab:"Gravité"},
+  {k:"detected_at", lab:"Détectée"},
+  {k:"acknowledged", lab:"Statut"}
+];
+
+async function ouvrirAlertes(){
+  document.getElementById("card-alertes").style.display = "";
+  attente("w-alertes");
+  try{
+    const p = new URLSearchParams();
+    if(S.nonLues) p.set("only_unack", "true");
+    if(S.centre) p.set("str_id", S.centre);
+    if(S.cycle) p.set("cycle", S.cycle);
+    S.alertes = await jget("/api/alertes?" + p.toString());
+    dessinerAlertes();
+  }catch(e){
+    document.getElementById("w-alertes").innerHTML =
+      '<div class="msg">'+esc(e.message)+"</div>";
+  }
+}
+
+function dessinerAlertes(){
+  const rows = trier(S.alertes, S.triA);
+  const perdu = rows.reduce((a,r)=> a + ((r.ecart||0)<0 ? -r.ecart : 0), 0);
+  const nonlu = rows.filter(r=>!r.acknowledged).length;
+  document.getElementById("sub-alertes").textContent =
+    rows.length + " alerte(s) — " + nonlu + " non consultée(s) — "
+    + n0(Math.round(perdu)) + " m³ perdus";
+
+  if(!rows.length){
+    document.getElementById("w-alertes").innerHTML =
+      '<div class="msg">Aucune alerte enregistrée.</div>';
+    return;
+  }
+  const corps = rows.map(r=>
+    '<tr class="clic g-'+esc(r.gravite)+'" data-a="'
+      + esc(r.centre_code)+"|"+esc(r.secteur_code)+"|"+esc(r.alert_id)+'">'
+    + "<td>"+esc(r.centre_libelle)+"</td>"
+    + '<td class="tnum">'+esc(r.secteur_num)+"</td>"
+    + "<td><b>"+esc(r.secteur_libelle)+"</b></td>"
+    + '<td class="tnum">'+esc(r.cycle)
+      + (r.comparaison === "N-1"
+          ? ' <span class="mut" title="Gros consommateur, comparé au mois précédent">(N-1)</span>'
+          : "")+"</td>"
+    + "<td>"+bEtat(r.etat)+"</td>"
+    + '<td class="num tnum">'+n0(r.vol_total_p)+"</td>"
+    + '<td class="num tnum">'+n0(r.vol_total_n)+"</td>"
+    + '<td class="num tnum">'+sgn(r.ecart_total, n0)+"</td>"
+    + '<td class="num tnum">'+sgn(r.ecart_total_pct, v=>NF1.format(v)+" %")+"</td>"
+    + '<td class="num tnum">'+n0(r.vol_p)+"</td>"
+    + '<td class="num tnum">'+n0(r.vol_n)+"</td>"
+    + '<td class="num tnum">'+sgn(r.ecart, n0)+"</td>"
+    + '<td class="num tnum">'+sgn(r.ecart_pct, v=>NF1.format(v)+" %")+"</td>"
+    + "<td>"+bGravite(r.gravite)+"</td>"
+    + '<td class="tnum mut">'+hm(r.detected_at)+"</td>"
+    + "<td>" + (r.acknowledged
+        ? '<span class="b b-vu">consultée</span>'
+        : '<span class="b b-new">nouvelle</span>') + "</td></tr>"
+  ).join("");
+
+  const w = document.getElementById("w-alertes");
+  w.innerHTML = "<table>"+entetes(COLS_A,S.triA,"a")+"<tbody>"+corps+"</tbody></table>";
+  brancherTri(w, "a", S.triA, dessinerAlertes);
+  w.querySelectorAll("tr[data-a]").forEach(tr=>{
+    tr.onclick = async ()=>{
+      const [c, sx, id] = tr.getAttribute("data-a").split("|");
+      /* Ouvrir une alerte la marque consultée : le compteur du bandeau
+         baisse d'une unité. */
+      const r = (S.alertes||[]).find(x=>String(x.alert_id) === id);
+      if(r && !r.acknowledged){
+        try{
+          await jpost("/api/alertes/acknowledge?alert_id="+encodeURIComponent(id));
+          r.acknowledged = true;
+        }catch(e){ /* sans gravité */ }
+        majBandeau(false);
+      }
+      allerAuDetail(c, sx);
+    };
+  });
+}
+
+/* ============================================================
+   Bandeau jaune — retards de facturation
+   ============================================================ */
+async function majBandeauRetard(flash){
+  let c;
+  /* Tous les retards du mois en cours (cycle du mois calendaire),
+     consultés ou non : le bandeau reste affiché tout le mois. */
+  const auj = new Date();
+  const cleMois = auj.getFullYear() * 100 + (auj.getMonth() + 1);
+  let nonLus = 0;
+  try{
+    c = await jget("/api/alertes-retard/count?only_unack=false&cycle=" + cleMois);
+    nonLus = (await jget("/api/alertes-retard/count?only_unack=true&cycle=" + cleMois)).n || 0;
+  }catch(e){ return; }
+
+  S.nbRetardNonLus = c.n || 0;
+  const el = document.getElementById("bandeau-retard");
+
+  if(S.nbRetardNonLus > 0){
+    const parts = [];
+    if(c.nb_en_retard) parts.push(n0(c.nb_en_retard)
+      + (c.nb_en_retard > 1 ? " secteurs en retard" : " secteur en retard"));
+    if(c.nb_proches) parts.push(n0(c.nb_proches)
+      + (c.nb_proches > 1 ? " secteurs en deadline proche"
+                          : " secteur en deadline proche"));
+    document.getElementById("bandr-t").textContent =
+      parts.join(" · ") || (S.nbRetardNonLus + " alerte(s) de retard");
+    document.getElementById("bandr-s").textContent =
+      n0(c.nb_centres) + " centre(s) · " + n0(c.parc_concerne)
+      + " abonnés concernés"
+      + (c.retard_max > 0 ? " · retard maximum " + n0(c.retard_max) + " jour(s)" : "")
+      + (c.derniere ? " · dernière détection " + hm(c.derniere) : "")
+      + (nonLus ? " · " + n0(nonLus) + " non consulté(s)" : "");
+    el.classList.add("on");
+    if(flash){
+      el.classList.remove("flash");
+      void el.offsetWidth;
+      el.classList.add("flash");
+    }
+  }else{
+    el.classList.remove("on", "flash");
+  }
+}
+
+async function consulterRetards(){
+  const b = document.getElementById("bandr-voir");
+  b.disabled = true;
+  try{
+    await jpost("/api/alertes-retard/acknowledge-all");
+    await majBandeauRetard(false);
+    ouvrirVue("retards");
+    await ouvrirAlertesRetard();
+  }catch(e){
+    erreur("Échec de l'acquittement : " + e.message);
+  }finally{
+    b.disabled = false;
+  }
+}
+
+/* ============================================================
+   VUE 3 — Retards de facturation
+   ============================================================ */
+/* Mêmes colonnes que l'onglet Retards du dashboard, plus les deux qui
+   sont propres à cette application : la date de facturation et le
+   retard sur cette date. */
+const COLS_RT = [
+  {k:"urgence", lab:"Statut"},
+  {k:"centre_libelle", lab:"Centre"},
+  {k:"secteur_libelle", lab:"Secteur"},
+  {k:"matricule_releveur", lab:"Releveur"},
+  {k:"pct_saisie", lab:"Avancement", num:true},
+  {k:"parc", lab:"Parc", num:true},
+  {k:"deadline", lab:"Deadline"},
+  {k:"jours_restants", lab:"Restant", num:true}
+];
+
+/* Regroupements proposés par les chips. « À traiter » est le défaut :
+   c'est la population de l'onglet Retards du dashboard. */
+const GROUPES_RT = [
+  {k:"A_TRAITER", lab:"Tous",
+   urgences:["EN_RETARD","DEADLINE_PROCHE"], cls:"rouge"},
+  {k:"EN_RETARD", lab:"Deadline dépassée",
+   urgences:["EN_RETARD"], cls:"rouge"},
+  {k:"DEADLINE_PROCHE", lab:"Deadline proche",
+   urgences:["DEADLINE_PROCHE"], cls:"jaune"}
+];
+
+/* Jours restants avant la deadline du releveur, formulés comme dans le
+   dashboard : « dépassé de N j » quand c'est négatif. */
+function restantTxt(j){
+  if(j===null||j===undefined||isNaN(j)) return '<span class="mut">—</span>';
+  if(j < 0) return '<span class="neg">dépassé de '+n0(-j)+' j</span>';
+  if(j === 0) return '<span class="neg">aujourd\'hui</span>';
+  return '<span class="mut">'+n0(j)+' j restants</span>';
+}
+
+const COLS_AR = [
+  {k:"centre_libelle", lab:"Centre"},
+  {k:"secteur_num", lab:"N°"},
+  {k:"secteur_libelle", lab:"Secteur"},
+  {k:"cycle", lab:"Cycle"},
+  {k:"urgence", lab:"Situation"},
+  {k:"etat", lab:"État cycle"},
+  {k:"pct_saisie", lab:"Saisie", num:true},
+  {k:"deadline", lab:"Date prévue"},
+  {k:"jours_retard", lab:"Retard", num:true},
+  {k:"detected_at", lab:"Détectée"},
+  {k:"acknowledged", lab:"Statut"}
+];
+
+async function chargerRetards(){
+  /* On charge tous les secteurs du cycle une seule fois : les chips
+     filtrent ensuite instantanément, et leurs compteurs sont exacts. */
+  /* Toujours le mois en cours, comme l'onglet Retards du dashboard. */
+  const auj = new Date();
+  const p = new URLSearchParams({cycle: auj.getFullYear()*100 + auj.getMonth() + 1});
+  if(S.centre) p.set("str_id", S.centre);
+  attente("w-retards");
+  try{
+    const [liste, syn] = await Promise.all([
+      jget("/api/retards?"+p.toString()),
+      jget("/api/retards/synthese?"+p.toString())
+    ]);
+    S.retards = S.zone
+      ? liste.filter(r=>String(r.zone_id) === String(S.zone)) : liste;
+    S.retardsSyn = syn;
+    dessinerRetards(); majCompteurs();
+  }catch(e){
+    erreur(e.message);
+    document.getElementById("w-retards").innerHTML =
+      '<div class="msg">Indisponible</div>';
+  }
+}
+
+function groupeRt(){
+  return GROUPES_RT.find(g=>g.k === S.filtreRt) || GROUPES_RT[0];
+}
+
+function dessinerChipsRt(){
+  const html = GROUPES_RT.map(g=>{
+    const n = g.urgences
+      ? S.retards.filter(r=>g.urgences.includes(r.urgence)).length
+      : S.retards.length;
+    const act = g.k === S.filtreRt ? " on" : "";
+    const dis = (n === 0 && g.k !== "TOUS" && g.k !== S.filtreRt)
+      ? " disabled" : "";
+    return '<button class="'+g.cls+act+'" data-g="'+g.k+'"'+dis+'>'
+      + esc(g.lab) + " (" + n + ")</button>";
+  }).join("");
+  const z = document.getElementById("chips-rt");
+  z.innerHTML = html;
+  z.querySelectorAll("button[data-g]").forEach(b=>{
+    b.onclick = ()=>{
+      S.filtreRt = b.getAttribute("data-g");
+      dessinerRetards();
+    };
+  });
+}
+
+function dessinerRetards(){
+  const enRetard = S.retards.filter(r=>r.urgence === "EN_RETARD");
+  const proches  = S.retards.filter(r=>r.urgence === "DEADLINE_PROCHE");
+  const tous = enRetard.concat(proches);
+  const centres = new Set(tous.map(r=>r.centre_code)).size;
+
+  document.getElementById("kpis-rt").innerHTML = [
+    {cls:(tous.length>0?"danger":"info"), lab:"Total retards",
+     val:n0(tous.length), sub:""},
+    {cls:(enRetard.length>0?"danger":"info"), lab:"Deadline dépassée",
+     val:n0(enRetard.length), sub:""},
+    {cls:(proches.length>0?"warn":"info"), lab:"Deadline proche",
+     val:n0(proches.length), sub:""},
+    {cls:"info", lab:"Centres concernés", val:n0(centres), sub:""}
+  ].map(kpiCarte).join("");
+
+  dessinerChipsRt();
+
+  const g = groupeRt();
+  const base = g.urgences
+    ? S.retards.filter(r=>g.urgences.includes(r.urgence))
+    : S.retards;
+  const rows = trier(
+    filtreTexte(base,
+      ["centre_libelle","secteur_libelle","secteur_num","matricule_releveur"]),
+    S.triR);
+
+  const t = document.getElementById("titre-retards");
+  t.textContent = rows.length + (rows.length > 1 ? " secteurs en retard" : " secteur en retard");
+  t.className = "titre-retard" + (rows.length ? " neg" : "");
+
+  if(!rows.length){
+    document.getElementById("w-retards").innerHTML =
+      '<div class="msg" style="padding:48px 0"><b>Aucun retard</b><br>'
+      + "Tous les secteurs sont dans les temps</div>";
+    return;
+  }
+
+  const corps = rows.map(r=>
+    '<tr class="clic u-'+esc(r.urgence)+'" data-rt="'
+      + esc(r.centre_code)+"|"+esc(r.secteur_code)+'">'
+    + "<td>"+bUrgence(r.urgence)+"</td>"
+    + "<td><b>"+esc(r.centre_libelle)+"</b></td>"
+    + "<td>"+esc(r.secteur_libelle)+"</td>"
+    + '<td class="tnum mut">'+esc(r.matricule_releveur||"—")+"</td>"
+    + '<td class="num">'+barre(r.pct_saisie)+"</td>"
+    + '<td class="num tnum">'+n0(r.saisis)+"/"+n0(r.parc)+"</td>"
+    + '<td class="tnum">'+jour(r.deadline)+"</td>"
+    + '<td class="num">'+restantTxt(r.jours_restants)+"</td></tr>"
+  ).join("");
+
+  const w = document.getElementById("w-retards");
+  w.innerHTML = "<table>"+entetes(COLS_RT,S.triR,"rt")+"<tbody>"+corps+"</tbody></table>";
+  brancherTri(w, "rt", S.triR, dessinerRetards);
+  w.querySelectorAll("tr[data-rt]").forEach(tr=>{
+    tr.onclick = ()=>{
+      const [c, sx] = tr.getAttribute("data-rt").split("|");
+      allerAuDetail(c, sx);
+    };
+  });
+}
+
+async function ouvrirAlertesRetard(){
+  document.getElementById("card-al-retard").style.display = "";
+  attente("w-al-retard");
+  try{
+    const p = new URLSearchParams();
+    if(S.centre) p.set("str_id", S.centre);
+    S.alertesRetard = await jget("/api/alertes-retard?" + p.toString());
+    dessinerAlertesRetard();
+  }catch(e){
+    document.getElementById("w-al-retard").innerHTML =
+      '<div class="msg">'+esc(e.message)+"</div>";
+  }
+}
+
+function dessinerAlertesRetard(){
+  const rows = trier(S.alertesRetard, S.triAR);
+  const nonlu = rows.filter(r=>!r.acknowledged).length;
+  document.getElementById("sub-al-retard").textContent =
+    rows.length + " alerte(s) — " + nonlu + " non consultée(s)";
+
+  if(!rows.length){
+    document.getElementById("w-al-retard").innerHTML =
+      '<div class="msg">Aucune alerte de retard enregistrée.</div>';
+    return;
+  }
+  const corps = rows.map(r=>
+    '<tr class="clic u-'+esc(r.urgence)+'" data-ar="'
+      + esc(r.centre_code)+"|"+esc(r.secteur_code)+'">'
+    + "<td>"+esc(r.centre_libelle)+"</td>"
+    + '<td class="tnum">'+esc(r.secteur_num)+"</td>"
+    + "<td><b>"+esc(r.secteur_libelle)+"</b></td>"
+    + '<td class="tnum">'+esc(r.cycle)+"</td>"
+    + "<td>"+bUrgence(r.urgence)+"</td>"
+    + "<td>"+bEtat(r.etat)+"</td>"
+    + '<td class="num tnum">'+n0(r.pct_saisie)+" %</td>"
+    + '<td class="tnum">'+jour(r.deadline)+"</td>"
+    + '<td class="num tnum">'+retardTxt(r.jours_retard)+"</td>"
+    + '<td class="tnum mut">'+hm(r.detected_at)+"</td>"
+    + "<td>" + (r.acknowledged
+        ? '<span class="b b-vu">consultée</span>'
+        : '<span class="b b-new">nouvelle</span>') + "</td></tr>"
+  ).join("");
+
+  const w = document.getElementById("w-al-retard");
+  w.innerHTML = "<table>"+entetes(COLS_AR,S.triAR,"ar")+"<tbody>"+corps+"</tbody></table>";
+  brancherTri(w, "ar", S.triAR, dessinerAlertesRetard);
+  w.querySelectorAll("tr[data-ar]").forEach(tr=>{
+    tr.onclick = ()=>{
+      const [c, sx] = tr.getAttribute("data-ar").split("|");
+      allerAuDetail(c, sx);
+    };
+  });
+}
+
+/* ============================================================
+   Temps réel (SSE)
+   ============================================================ */
+let es = null;
+function brancherSSE(){
+  if(es){ try{ es.close(); }catch(e){} }
+  es = new EventSource("/api/stream/alertes");
+
+  const chip = document.getElementById("chip-sse");
+
+  es.addEventListener("connecte", ()=>{
+    chip.className = "live on";
+    chip.lastElementChild.textContent = "EN DIRECT";
+  });
+  /* Chaque passage du watcher se traduit par une actualisation de la
+     page, sans rechargement : temps réel, sans rien relancer. */
+  es.addEventListener("nouvelle_baisse", ()=>{
+    majBandeau(true); actualiserSilencieux();
+  });
+  es.addEventListener("nouveau_retard", ()=>{
+    majBandeauRetard(true); actualiserSilencieux();
+  });
+  es.addEventListener("maj", ()=>{ actualiserSilencieux(); });
+  es.addEventListener("erreur", (ev)=>{
+    let d = {};
+    try{ d = JSON.parse(ev.data); }catch(e){}
+    if(d.message) erreur("Watcher : " + d.message);
+  });
+  es.onerror = ()=>{
+    chip.className = "live";
+    chip.lastElementChild.textContent = "HORS LIGNE";
+  };
+}
+
+/* ============================================================
+   État / fraîcheur
+   ============================================================ */
+async function majEtat(){
+  try{
+    const e = await jget("/api/etat");
+    const c = document.getElementById("chip-maj");
+    const bloc = document.getElementById("hmaj");
+    const b = e.base || {}, w = e.watcher || {};
+    c.textContent = b.derniere_maj ? hm(b.derniere_maj) : "—";
+    /* L'état de la veille passe en info-bulle, la case reste sobre. */
+    let t = w.actif
+      ? "Veille toutes les " + Math.round((w.intervalle_sec||0)/60) + " min"
+      : "Veille arrêtée";
+    if(w.derniere_erreur) t += "\n" + w.derniere_erreur;
+    bloc.title = t;
+    bloc.className = "hmaj" + (w.derniere_erreur || !w.actif ? " warn" : "");
+    if(b.vide){
+      erreur("La base locale est vide. Lance le chargement initial :\n"
+             + "python -m src.etl");
+    }
+  }catch(e){ /* sans gravité */ }
+}
+
+/* ============================================================
+   Cycles
+   ============================================================ */
+async function chargerCycles(){
+  const d = await jget("/api/cycles");
+  S.cycles = d.cycles || [];
+  S.annees = d.annees || [];
+  S.cycle = d.defaut || (S.cycles[0] && S.cycles[0].cycle_key) || null;
+  S.annee = S.cycle ? Math.floor(S.cycle / 100) : (S.annees[0] || null);
+
+  document.getElementById("sel-annee").innerHTML = S.annees.map(a=>
+    '<option value="'+a+'"'+(a===S.annee?" selected":"")+">"+a+"</option>"
+  ).join("");
+  remplirCyclesDeLAnnee();
+}
+
+function remplirCyclesDeLAnnee(){
+  const sc = document.getElementById("sel-cycle");
+  const liste = S.cycles.filter(c=>Number(c.annee) === Number(S.annee));
+  sc.innerHTML = liste.map(c=>
+    '<option value="'+c.cycle_key+'"'+(c.cycle_key===S.cycle?" selected":"")+">"
+    + esc(c.libelle) + (c.comparable ? "" : " (pas de N-2)") + "</option>"
+  ).join("");
+  if(!liste.some(c=>c.cycle_key===S.cycle) && liste.length){
+    S.cycle = liste[0].cycle_key;
+    sc.value = String(S.cycle);
+  }
+}
+
+/* ============================================================
+   Filtres centre / secteur
+   ============================================================ */
+/* Centres groupés par zone, libellés « NN — NOM », comme la barre de
+   filtres du dashboard de suivi temps réel. */
+async function chargerListes(){
+  try{
+    S.centresListe = await jget("/api/centres-list?cycle="+S.cycle);
+  }catch(e){ S.centresListe = []; }
+  if(S.zone) S.centresListe = S.centresListe.filter(
+    c=>String(c.zone_id) === String(S.zone));
+
+  const zones = new Map();
+  S.centresListe.forEach(c=>{
+    const z = c.zone_lib || "(zone inconnue)";
+    if(!zones.has(z)) zones.set(z, []);
+    zones.get(z).push(c);
+  });
+
+  let html = '<option value="">Tous les centres</option>';
+  [...zones.entries()]
+    .sort((a,b)=>String(a[0]).localeCompare(String(b[0]), "fr"))
+    .forEach(([z, liste])=>{
+      html += '<optgroup label="'+esc(z)+'">';
+      liste.sort((a,b)=>Number(a.centre_code) - Number(b.centre_code))
+        .forEach(c=>{
+          html += '<option value="'+esc(c.centre_code)+'">'
+            + esc(String(c.centre_code).padStart(2, "0")) + " — "
+            + esc(c.centre_libelle) + " (" + c.nb_secteurs + ")</option>";
+        });
+      html += "</optgroup>";
+    });
+
+  const sc = document.getElementById("sel-centre");
+  sc.innerHTML = html;
+  sc.value = S.centre;
+  await chargerSecteursListe();
+}
+
+async function chargerSecteursListe(){
+  const p = new URLSearchParams({cycle:S.cycle});
+  if(S.centre) p.set("str_id", S.centre);
+  try{
+    S.secteursListe = await jget("/api/secteurs-list?"+p.toString());
+  }catch(e){ S.secteursListe = []; }
+
+  /* Le filtre secteur n'affiche que les NUMÉROS. Un même numéro peut
+     exister dans plusieurs centres, donc il faut choisir le centre
+     d'abord — même logique que la barre de filtres du dashboard. */
+  const ss = document.getElementById("sel-secteur");
+  if(!S.centre){
+    ss.innerHTML = '<option value="">Choisir un centre d\'abord</option>';
+    ss.disabled = true;
+    S.secteur = "";
+    return;
+  }
+  ss.disabled = false;
+  ss.innerHTML = '<option value="">Tous les secteurs</option>'
+    + S.secteursListe
+        .slice()
+        .sort((a,b)=>String(a.secteur_num).localeCompare(
+          String(b.secteur_num), "fr", {numeric:true}))
+        .map(x=>'<option value="'+esc(x.secteur_code)+'">'
+          + esc(x.secteur_num) + "</option>").join("");
+  if(!S.secteursListe.some(x=>String(x.secteur_code) === String(S.secteur))){
+    S.secteur = "";
+  }
+  ss.value = S.secteur;
+}
+
+function secteurCourant(){
+  return S.secteursListe.find(
+    x=>String(x.secteur_code) === String(S.secteur)) || null;
+}
+
+function allerAuDetail(strId, sectId){
+  S.centre = String(strId);
+  document.getElementById("sel-centre").value = S.centre;
+  chargerSecteursListe().then(()=>{
+    S.secteur = String(sectId);
+    document.getElementById("sel-secteur").value = S.secteur;
+    ouvrirVue("abonnes");
+  });
+}
+
+/* ============================================================
+   VUE 1 — Baisses
+   ============================================================ */
+async function chargerTout(){
+  erreur("");
+  majBandeau(false);
+  const qs = "cycle=" + encodeURIComponent(S.cycle)
+           + (S.zone ? "&zone=" + S.zone : "");
+  try{
+    const [syn, cen] = await Promise.all([
+      jget("/api/synthese?"+qs),
+      jget("/api/centres?"+qs)
+    ]);
+    S.synthese = syn; S.centres = cen;
+    dessinerKpis(); dessinerCentres(); majCompteurs();
+    jget("/api/retards/synthese?cycle="+(new Date().getFullYear()*100+new Date().getMonth()+1))
+      .then(r=>{ S.rtNb = (r.nb_en_retard||0) + (r.nb_proches||0);
+                 S.rtRetard = r.nb_en_retard||0; majCompteurs(); })
+      .catch(()=>{});
+    jget("/api/synthese?"+qs+"&population=mensuel")
+      .then(g=>{ S.gNb = g.nb_en_baisse||0; majCompteurs(); })
+      .catch(()=>{});
+    await chargerSecteurs();
+  }catch(e){
+    erreur(e.message);
+    document.getElementById("w-centres").innerHTML =
+      '<div class="msg">Indisponible</div>';
+    document.getElementById("w-secteurs").innerHTML =
+      '<div class="msg">Indisponible</div>';
+    document.getElementById("kpis").innerHTML = "";
+  }
+}
+
+async function chargerSecteurs(){
+  const p = qsCycle();
+  if(S.minPct > 0) p.set("baisse_min_pct", S.minPct);
+  if(S.toutes) p.set("toutes", "true");
+  attente("w-secteurs");
+  try{
+    S.secteurs = await jget("/api/secteurs?"+p.toString());
+    dessinerSecteurs();
+  }catch(e){
+    erreur(e.message);
+    document.getElementById("w-secteurs").innerHTML =
+      '<div class="msg">Indisponible</div>';
+  }
+}
+
+function dessinerKpis(){
+  const s = S.synthese || {};
+  document.getElementById("hsub").textContent =
+    "Cycle " + (s.cycle||"—") + " comparé au cycle " + (s.cycle_precedent||"—")
+    + " — groupe " + (s.parite||"—")
+    + (s.nb_gros_consommateurs
+        ? " — hors " + n0(s.nb_gros_consommateurs) + " gros consommateur(s), comparés à N-1"
+        : "");
+
+  const baisse = (s.ecart||0) < 0;
+  const cards = [
+    {cls:"info", lab:"Volume facturé — cycle "+(s.cycle||""),
+     val:n0(s.vol_n)+" m³",
+     sub:"cycle "+(s.cycle_precedent||"")+" : "+n0(s.vol_p)+" m³"},
+    {cls: baisse?"danger":"good", lab:"Écart global",
+     val:((s.ecart>0?"+":"")+n0(s.ecart))+" m³",
+     sub:(s.ecart_pct===null||s.ecart_pct===undefined)
+           ? "—" : ((s.ecart_pct>0?"+":"")+pc(s.ecart_pct))},
+    {cls:(s.nb_en_baisse>0?"danger":"good"), lab:"Secteurs en baisse",
+     val:n0(s.nb_en_baisse)+" / "+n0(s.nb_secteurs),
+     sub:n0(s.nb_centres_touches)+" centre(s) concerné(s)"},
+    {cls:(s.volume_perdu>0?"danger":""), lab:"Volume perdu",
+     val:n0(s.volume_perdu)+" m³",
+     sub:"abonnés perdus : "+n0(s.nb_perdus)+" ("+n0(s.vol_perdus)+" m³)"}
+  ];
+  document.getElementById("kpis").innerHTML = cards.map(kpiCarte).join("");
+
+  document.getElementById("legend").innerHTML =
+    ["FORTE","MOYENNE","LEGERE","DISPARU","VOLUME_NUL","STABLE","HAUSSE",
+     "NOUVEAU"]
+      .map(g=>'<span class="b b-'+g+'">'+esc(LIB_GRAVITE[g])+"</span>").join("");
+}
+
+const COLS_C = [
+  {k:"centre_libelle", lab:"Centre"},
+  {k:"nb_en_baisse", lab:"Baisses", num:true},
+  {k:"ecart", lab:"Écart m³", num:true},
+  {k:"ecart_pct", lab:"Écart %", num:true}
+];
+
+function dessinerCentres(){
+  const rows = trier(S.centres, S.triC);
+  const s = S.synthese || {};
+  document.getElementById("sub-centres").textContent =
+    rows.length + " centre(s) — volumes en m³, cycle " + (s.cycle||"")
+    + " vs " + (s.cycle_precedent||"");
+
+  if(!rows.length){
+    document.getElementById("w-centres").innerHTML =
+      '<div class="msg">Aucun centre pour ce cycle.</div>';
+    return;
+  }
+  const corps = rows.map(r=>
+    '<tr class="clic g-'+esc(r.gravite)
+      + (String(r.centre_code) === String(S.centre) ? " sel" : "")
+      + '" data-c="'+esc(r.centre_code)+'">'
+    + "<td><b>"+esc(r.centre_libelle)+"</b></td>"
+    + '<td class="num"><span class="pastille'+(r.nb_en_baisse>0 ? " on" : "")+'">'
+      + n0(r.nb_en_baisse)+"</span></td>"
+    + '<td class="num tnum">'+sgn(r.ecart, n0)+"</td>"
+    + '<td class="num tnum">'+sgn(r.ecart_pct, v=>NF1.format(v)+" %")+"</td></tr>"
+  ).join("");
+
+  const w = document.getElementById("w-centres");
+  w.innerHTML = "<table>"+entetes(COLS_C,S.triC,"c")+"<tbody>"+corps+"</tbody></table>";
+  brancherTri(w, "c", S.triC, dessinerCentres);
+  w.querySelectorAll("tr[data-c]").forEach(tr=>{
+    tr.onclick = async ()=>{
+      const c = tr.getAttribute("data-c");
+      S.centre = (S.centre === c) ? "" : c;
+      document.getElementById("sel-centre").value = S.centre;
+      dessinerCentres();
+      await chargerSecteursListe();
+      chargerSecteurs();
+    };
+  });
+}
+
+const COLS_S = [
+  {k:"centre_libelle", lab:"Centre"},
+  {k:"secteur_num", lab:"N°"},
+  {k:"secteur_libelle", lab:"Secteur"},
+  {k:"vol_p_cycle", lab:"Volume N-2", num:true},
+  {k:"vol_n", lab:"Volume N", num:true},
+  {k:"vol_p", lab:"Référence", num:true},
+  {k:"ecart", lab:"Écart m³", num:true},
+  {k:"ecart_pct", lab:"Écart %", num:true},
+  {k:"gravite", lab:"Gravité"}
+];
+
+function dessinerSecteurs(){
+  let base = S.secteurs;
+  {
+    const ce = S.centres.find(x=>String(x.centre_code) === String(S.centre));
+    document.getElementById("t-secteurs").textContent =
+      "Secteurs en baisse — " + (ce ? ce.centre_libelle : "tous les centres");
+  }
+  if(S.secteur){
+    base = base.filter(r=>String(r.secteur_code) === String(S.secteur));
+  }
+  const rows = trier(
+    filtreTexte(base, ["centre_libelle","secteur_libelle","secteur_num"]),
+    S.triS);
+  const s = S.synthese || {};
+  const perdu = rows.reduce((a,r)=> a + ((r.ecart||0)<0 ? -r.ecart : 0), 0);
+  document.getElementById("sub-secteurs").textContent =
+    rows.length + " secteur(s) affiché(s) — " + n0(Math.round(perdu))
+    + " m³ perdus — cycle " + (s.cycle||"") + " vs " + (s.cycle_precedent||"");
+
+  const nbProv = rows.filter(r=>r.fiabilite==="provisoire").length;
+  document.getElementById("note-prov").textContent = nbProv
+    ? nbProv + " secteur(s) ont une comparaison provisoire : la saisie du "
+      + "cycle n'est pas terminée, le volume va encore monter. Ces secteurs "
+      + "ne déclenchent pas d'alerte."
+    : "";
+
+  if(!rows.length){
+    document.getElementById("w-secteurs").innerHTML =
+      '<div class="msg">Aucun secteur en baisse avec ces critères.</div>';
+    return;
+  }
+
+  const corps = rows.map(r=>{
+    const prov = r.fiabilite === "provisoire"
+      ? ' <span class="b b-prov">provisoire</span>' : "";
+    return '<tr class="clic g-'+esc(r.gravite)+'" data-s="'
+      + esc(r.centre_code)+"|"+esc(r.secteur_code)+'">'
+      + (S.centre ? "" : "<td>"+esc(r.centre_libelle)+"</td>")
+      + '<td class="tnum">'+esc(r.secteur_num)+"</td>"
+      + "<td><b>"+esc(r.secteur_libelle)+"</b></td>"
+      + '<td class="num tnum">'+n0(r.vol_p_cycle)+"</td>"
+      + '<td class="num tnum"><b>'+n0(r.vol_n)+"</b></td>"
+      + '<td class="num tnum mut">'+n0(r.vol_p)+"</td>"
+      + '<td class="num tnum">'+sgn(r.ecart, n0)+"</td>"
+      + '<td class="num tnum">'+sgn(r.ecart_pct, v=>NF1.format(v)+" %")+"</td>"
+      + "<td>"+bGravite(r.gravite)+"</td></tr>";
+  }).join("");
+
+  const w = document.getElementById("w-secteurs");
+  w.innerHTML = "<table>"+entetes(S.centre ? COLS_S.filter(c=>c.k!=="centre_libelle") : COLS_S,S.triS,"s")+"<tbody>"+corps+"</tbody></table>";
+  brancherTri(w, "s", S.triS, dessinerSecteurs);
+  w.querySelectorAll("tr[data-s]").forEach(tr=>{
+    tr.onclick = ()=>{
+      const [c, sx] = tr.getAttribute("data-s").split("|");
+      allerAuDetail(c, sx);
+    };
+  });
+}
+
+/* ============================================================
+   VUE 1 bis — Gros consommateurs (comparaison à N-1)
+   ============================================================ */
+const COLS_GC = COLS_C.map(c=>Object.assign({}, c, {lab:c.lab.replace("N-2","N-1")}));
+const COLS_GS = COLS_S.map(c=>Object.assign({}, c, {lab:c.lab.replace("N-2","N-1")}));
+
+async function chargerGros(){
+  erreur("");
+  const qs = "cycle=" + encodeURIComponent(S.cycle) + "&population=mensuel"
+           + (S.zone ? "&zone=" + S.zone : "");
+  attente("w-g-centres");
+  try{
+    const [syn, cen] = await Promise.all([
+      jget("/api/synthese?"+qs),
+      jget("/api/centres?"+qs)
+    ]);
+    S.gSynthese = syn; S.gCentres = cen;
+    dessinerGrosKpis(); dessinerGrosCentres(); majCompteurs();
+    await chargerGrosSecteurs();
+  }catch(e){
+    erreur(e.message);
+    document.getElementById("w-g-centres").innerHTML =
+      '<div class="msg">Indisponible</div>';
+    document.getElementById("w-g-secteurs").innerHTML =
+      '<div class="msg">Indisponible</div>';
+    document.getElementById("kpis-g").innerHTML = "";
+  }
+}
+
+async function chargerGrosSecteurs(){
+  const p = qsCycle({population:"mensuel"});
+  if(S.gMin > 0) p.set("baisse_min_pct", S.gMin);
+  if(S.gToutes) p.set("toutes", "true");
+  attente("w-g-secteurs");
+  try{
+    S.gSecteurs = await jget("/api/secteurs?"+p.toString());
+    dessinerGrosSecteurs();
+  }catch(e){
+    erreur(e.message);
+    document.getElementById("w-g-secteurs").innerHTML =
+      '<div class="msg">Indisponible</div>';
+  }
+}
+
+function dessinerGrosKpis(){
+  const s = S.gSynthese || {};
+  const baisse = (s.ecart||0) < 0;
+  const cards = [
+    {cls:"info", lab:"Volume facturé — mois "+(s.cycle||""),
+     val:n0(s.vol_n)+" m³",
+     sub:"mois "+(s.cycle_precedent||"")+" : "+n0(s.vol_p)+" m³"},
+    {cls: baisse?"danger":"good", lab:"Écart global",
+     val:((s.ecart>0?"+":"")+n0(s.ecart))+" m³",
+     sub:(s.ecart_pct===null||s.ecart_pct===undefined)
+           ? "—" : ((s.ecart_pct>0?"+":"")+pc(s.ecart_pct))},
+    {cls:(s.nb_en_baisse>0?"danger":"good"), lab:"Gros consommateurs en baisse",
+     val:n0(s.nb_en_baisse)+" / "+n0(s.nb_secteurs),
+     sub:n0(s.nb_gros_consommateurs)+" secteur(s) mensuel(s) repéré(s), "
+         + n0(s.nb_secteurs)+" facturé(s) ce mois"},
+    {cls:(s.volume_perdu>0?"danger":""), lab:"Volume perdu",
+     val:n0(s.volume_perdu)+" m³",
+     sub:n0(s.nb_centres_touches)+" centre(s) concerné(s)"}
+  ];
+  document.getElementById("kpis-g").innerHTML = cards.map(kpiCarte).join("");
+}
+
+function dessinerGrosCentres(){
+  const rows = trier(S.gCentres, S.triGC);
+  const s = S.gSynthese || {};
+  document.getElementById("sub-g-centres").textContent =
+    rows.length + " centre(s) — volumes en m³, mois " + (s.cycle||"")
+    + " vs " + (s.cycle_precedent||"");
+  if(!rows.length){
+    document.getElementById("w-g-centres").innerHTML =
+      '<div class="msg">Aucun gros consommateur facturé sur ce mois.</div>';
+    return;
+  }
+  const corps = rows.map(r=>
+    '<tr class="clic g-'+esc(r.gravite)
+      + (String(r.centre_code) === String(S.centre) ? " sel" : "")
+      + '" data-c="'+esc(r.centre_code)+'">'
+    + "<td><b>"+esc(r.centre_libelle)+"</b></td>"
+    + '<td class="num"><span class="pastille'+(r.nb_en_baisse>0 ? " on" : "")+'">'
+      + n0(r.nb_en_baisse)+"</span></td>"
+    + '<td class="num tnum">'+sgn(r.ecart, n0)+"</td>"
+    + '<td class="num tnum">'+sgn(r.ecart_pct, v=>NF1.format(v)+" %")+"</td></tr>"
+  ).join("");
+  const w = document.getElementById("w-g-centres");
+  w.innerHTML = "<table>"+entetes(COLS_GC,S.triGC,"gc")+"<tbody>"+corps+"</tbody></table>";
+  brancherTri(w, "gc", S.triGC, dessinerGrosCentres);
+  w.querySelectorAll("tr[data-c]").forEach(tr=>{
+    tr.onclick = async ()=>{
+      const c = tr.getAttribute("data-c");
+      S.centre = (S.centre === c) ? "" : c;
+      document.getElementById("sel-centre").value = S.centre;
+      dessinerGrosCentres();
+      await chargerSecteursListe();
+      chargerGrosSecteurs();
+    };
+  });
+}
+
+function dessinerGrosSecteurs(){
+  let base = S.gSecteurs;
+  {
+    const ce = S.gCentres.find(x=>String(x.centre_code) === String(S.centre));
+    document.getElementById("t-g-secteurs").textContent =
+      "Gros consommateurs en baisse — " + (ce ? ce.centre_libelle : "tous les centres");
+  }
+  if(S.secteur){
+    base = base.filter(r=>String(r.secteur_code) === String(S.secteur));
+  }
+  const rows = trier(
+    filtreTexte(base, ["centre_libelle","secteur_libelle","secteur_num"]),
+    S.triGS);
+  const s = S.gSynthese || {};
+  const perdu = rows.reduce((a,r)=> a + ((r.ecart||0)<0 ? -r.ecart : 0), 0);
+  document.getElementById("sub-g-secteurs").textContent =
+    rows.length + " secteur(s) affiché(s) — " + n0(Math.round(perdu))
+    + " m³ perdus — mois " + (s.cycle||"") + " vs " + (s.cycle_precedent||"");
+  const nbProv = rows.filter(r=>r.fiabilite==="provisoire").length;
+  document.getElementById("note-prov-g").textContent = nbProv
+    ? nbProv + " secteur(s) ont une comparaison provisoire : la saisie du "
+      + "mois n'est pas terminée. Ces secteurs ne déclenchent pas d'alerte."
+    : "";
+  if(!rows.length){
+    document.getElementById("w-g-secteurs").innerHTML =
+      '<div class="msg">Aucun gros consommateur en baisse avec ces critères.</div>';
+    return;
+  }
+  const corps = rows.map(r=>{
+    const prov = r.fiabilite === "provisoire"
+      ? ' <span class="b b-prov">provisoire</span>' : "";
+    return '<tr class="clic g-'+esc(r.gravite)+'" data-s="'
+      + esc(r.centre_code)+"|"+esc(r.secteur_code)+'">'
+      + (S.centre ? "" : "<td>"+esc(r.centre_libelle)+"</td>")
+      + '<td class="tnum">'+esc(r.secteur_num)+"</td>"
+      + "<td><b>"+esc(r.secteur_libelle)+"</b></td>"
+      + '<td class="num tnum">'+n0(r.vol_p_cycle)+"</td>"
+      + '<td class="num tnum"><b>'+n0(r.vol_n)+"</b></td>"
+      + '<td class="num tnum mut">'+n0(r.vol_p)+"</td>"
+      + '<td class="num tnum">'+sgn(r.ecart, n0)+"</td>"
+      + '<td class="num tnum">'+sgn(r.ecart_pct, v=>NF1.format(v)+" %")+"</td>"
+      + "<td>"+bGravite(r.gravite)+"</td></tr>";
+  }).join("");
+  const w = document.getElementById("w-g-secteurs");
+  w.innerHTML = "<table>"+entetes(S.centre ? COLS_GS.filter(c=>c.k!=="centre_libelle") : COLS_GS,S.triGS,"gs")+"<tbody>"+corps+"</tbody></table>";
+  brancherTri(w, "gs", S.triGS, dessinerGrosSecteurs);
+  w.querySelectorAll("tr[data-s]").forEach(tr=>{
+    tr.onclick = ()=>{
+      const [c, sx] = tr.getAttribute("data-s").split("|");
+      allerAuDetail(c, sx);
+    };
+  });
+}
+
+/* ============================================================
+   VUE 2 — Avancement de la saisie
+   ============================================================ */
+const COLS_V = [
+  {k:"centre_libelle", lab:"Centre"},
+  {k:"secteur_num", lab:"N°"},
+  {k:"secteur_libelle", lab:"Secteur"},
+  {k:"etat", lab:"État"},
+  {k:"parc", lab:"Parc", num:true},
+  {k:"pct_declare", lab:"Saisie déclarée", num:true},
+  {k:"pct_reel", lab:"Saisie réelle", num:true},
+  {k:"saisis_declare", lab:"Saisis", num:true},
+  {k:"restant", lab:"Restant", num:true},
+  {k:"nb_jours_actifs", lab:"Jours", num:true},
+  {k:"premier_releve", lab:"1er relevé"},
+  {k:"dernier_releve", lab:"Dernier relevé"},
+  {k:"date_cloture", lab:"Clôture"},
+  {k:"nb_factures", lab:"Factures", num:true},
+  {k:"ecart", lab:"Écart m³", num:true}
+];
+
+async function chargerAvancement(){
+  const p = qsCycle();
+  if(S.secteur) p.set("sect_id", S.secteur);
+  if(S.etatAv) p.set("statut", S.etatAv);
+  attente("w-avancement");
+  try{
+    S.avancement = await jget("/api/avancement?"+p.toString());
+    dessinerAvancement(); majCompteurs();
+  }catch(e){
+    erreur(e.message);
+    document.getElementById("w-avancement").innerHTML =
+      '<div class="msg">Indisponible</div>';
+  }
+}
+
+function dessinerAvancement(){
+  const rows = trier(
+    filtreTexte(S.avancement,
+      ["centre_libelle","secteur_libelle","secteur_num","matricule_releveur"]),
+    S.triV);
+
+  const par = (e)=> S.avancement.filter(r=>r.etat === e).length;
+  const parc = S.avancement.reduce((a,r)=>a+(r.parc||0), 0);
+  const saisis = S.avancement.reduce((a,r)=>a+(r.saisis_declare||0), 0);
+  const pct = parc ? Math.round(1000 * saisis / parc) / 10 : null;
+
+  document.getElementById("kpis-av").innerHTML = [
+    {cls:"info", lab:"Avancement du cycle",
+     val:(pct===null?"—":NF1.format(pct)+" %"),
+     sub:n0(saisis)+" saisis sur "+n0(parc)+" abonnés"},
+    {cls:(par("NON_COMMENCE")>0?"danger":"good"), lab:"Non commencés",
+     val:n0(par("NON_COMMENCE")),
+     sub:"aucun relevé saisi à ce jour"},
+    {cls:"", lab:"Saisie en cours", val:n0(par("EN_COURS")),
+     sub:n0(par("SAISIE_FINIE"))+" à 100 % non clôturé(s)"},
+    {cls:"good", lab:"Clôturés ou facturés",
+     val:n0(par("CLOTURE")+par("FACTURE")),
+     sub:n0(par("FACTURE"))+" déjà facturé(s)"}
+  ].map(kpiCarte).join("");
+
+  document.getElementById("legend-av").innerHTML =
+    ["NON_COMMENCE","EN_COURS","SAISIE_FINIE","CLOTURE","FACTURE"]
+      .map(e=>bEtat(e)).join("");
+
+  document.getElementById("sub-avancement").textContent =
+    rows.length + " secteur(s) — cycle "
+    + (S.synthese ? S.synthese.cycle : "");
+
+  const ecarts = rows.filter(r=>
+    r.pct_declare !== null && r.pct_reel !== null
+    && Math.abs((r.pct_declare||0) - (r.pct_reel||0)) >= 10).length;
+  document.getElementById("note-av").textContent = ecarts
+    ? ecarts + " secteur(s) présentent plus de 10 points d'écart entre la "
+      + "saisie déclarée par CLOTURE_SECTEUR et les relevés réellement "
+      + "présents dans S_RELEVE. Soit les données locales ne sont pas "
+      + "encore à jour, soit des relevés ont été saisis hors du compteur "
+      + "déclaré."
+    : "";
+
+  if(!rows.length){
+    document.getElementById("w-avancement").innerHTML =
+      '<div class="msg">Aucun secteur pour ces critères.</div>';
+    return;
+  }
+
+  const corps = rows.map(r=>
+    '<tr class="clic" data-av="'+esc(r.centre_code)+"|"+esc(r.secteur_code)+'">'
+    + "<td>"+esc(r.centre_libelle)+"</td>"
+    + '<td class="tnum">'+esc(r.secteur_num)+"</td>"
+    + "<td><b>"+esc(r.secteur_libelle)+"</b>"
+      + (r.matricule_releveur
+          ? '<br><span class="mut" style="font-size:11px">releveur '
+            + esc(r.matricule_releveur)+"</span>" : "")+"</td>"
+    + "<td>"+bEtat(r.etat)+"</td>"
+    + '<td class="num tnum">'+n0(r.parc)+"</td>"
+    + '<td class="num">'+barre(r.pct_declare)+"</td>"
+    + '<td class="num">'+barre(r.pct_reel)+"</td>"
+    + '<td class="num tnum">'+n0(r.saisis_declare)+"</td>"
+    + '<td class="num tnum">'+(r.restant>0
+        ? '<span class="neg">'+n0(r.restant)+"</span>" : n0(r.restant))+"</td>"
+    + '<td class="num tnum">'+n0(r.nb_jours_actifs)+"</td>"
+    + '<td class="tnum mut">'+jour(r.premier_releve)+"</td>"
+    + '<td class="tnum mut">'+jour(r.dernier_releve)+"</td>"
+    + '<td class="tnum mut">'+jour(r.date_cloture)+"</td>"
+    + '<td class="num tnum">'+n0(r.nb_factures)+"</td>"
+    + '<td class="num tnum">'+sgn(r.ecart, n0)+"</td></tr>"
+  ).join("");
+
+  const w = document.getElementById("w-avancement");
+  w.innerHTML = "<table>"+entetes(COLS_V,S.triV,"v")+"<tbody>"+corps+"</tbody></table>";
+  brancherTri(w, "v", S.triV, dessinerAvancement);
+  w.querySelectorAll("tr[data-av]").forEach(tr=>{
+    tr.onclick = ()=>{
+      const [c, sx] = tr.getAttribute("data-av").split("|");
+      chargerJours(c, sx);
+    };
+  });
+}
+
+/* ---- Progression quotidienne : petit graphe SVG, sans bibliothèque ---- */
+async function chargerJours(strId, sectId){
+  document.getElementById("card-jours").style.display = "";
+  attente("w-jours");
+  const p = new URLSearchParams({cycle:S.cycle, str_id:strId,
+                                 sect_id:sectId});
+  try{
+    S.jours = await jget("/api/avancement/jours?"+p.toString());
+    dessinerJours();
+    document.getElementById("card-jours").scrollIntoView(
+      {behavior:"smooth", block:"nearest"});
+  }catch(e){
+    document.getElementById("w-jours").innerHTML =
+      '<div class="msg">'+esc(e.message)+"</div>";
+  }
+}
+
+function dessinerJours(){
+  const d = S.jours; if(!d) return;
+  const e = d.entete || {};
+  document.getElementById("sub-jours").textContent =
+    (e.centre_libelle||"") + " · " + (e.secteur_libelle||"")
+    + " — cycle " + d.cycle + " — " + n0(d.total) + " compteurs relevés sur "
+    + n0(d.parc) + " abonnés"
+    + (e.etat ? " — " + (LIB_ETAT[e.etat]||e.etat) : "");
+
+  const J = d.jours || [];
+  if(!J.length){
+    document.getElementById("w-jours").innerHTML =
+      '<div class="msg">Aucun relevé saisi sur ce cycle pour ce secteur.</div>';
+    return;
+  }
+
+  const W = 900, H = 170, mg = {t:12, r:42, b:26, l:42};
+  const iw = W - mg.l - mg.r, ih = H - mg.t - mg.b;
+  const maxNb = Math.max(...J.map(x=>x.nb), 1);
+  const pas = iw / J.length;
+  const largeur = Math.max(2, Math.min(pas * 0.7, 34));
+
+  let bars = "", pts = [], labels = "";
+  J.forEach((x, i)=>{
+    const h = ih * (x.nb / maxNb);
+    const cx = mg.l + pas * i + pas / 2;
+    bars += '<rect class="g-bar" x="'+(cx - largeur/2).toFixed(1)+'" y="'
+      + (mg.t + ih - h).toFixed(1)+'" width="'+largeur.toFixed(1)
+      + '" height="'+h.toFixed(1)+'" rx="2"><title>'
+      + esc(jour(x.jour))+" : "+x.nb+" relevés, cumul "+x.cumul
+      + (x.pct_cumul!==null ? " ("+x.pct_cumul+" %)" : "")
+      + "</title></rect>";
+    const py = mg.t + ih - ih * Math.min((x.pct_cumul||0)/100, 1);
+    pts.push(cx.toFixed(1)+","+py.toFixed(1));
+    /* Une étiquette sur deux quand il y a beaucoup de jours. */
+    if(J.length <= 14 || i % Math.ceil(J.length/12) === 0){
+      labels += '<text class="g-txt" x="'+cx.toFixed(1)+'" y="'+(H-8)
+        + '" text-anchor="middle">'+esc(jour(x.jour))+"</text>";
+    }
+  });
+
+  const svg = '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'
+    + '<line class="g-axe" x1="'+mg.l+'" y1="'+(mg.t+ih)+'" x2="'+(W-mg.r)
+      + '" y2="'+(mg.t+ih)+'"/>'
+    + '<line class="g-axe" x1="'+mg.l+'" y1="'+mg.t+'" x2="'+(W-mg.r)
+      + '" y2="'+mg.t+'" stroke-dasharray="3 3"/>'
+    + '<text class="g-txt" x="'+(mg.l-6)+'" y="'+(mg.t+4)
+      + '" text-anchor="end">'+maxNb+"</text>"
+    + '<text class="g-txt" x="'+(W-mg.r+6)+'" y="'+(mg.t+4)
+      + '">100 %</text>'
+    + '<text class="g-txt" x="'+(mg.l-6)+'" y="'+(mg.t+ih+4)
+      + '" text-anchor="end">0</text>'
+    + bars
+    + '<polyline class="g-line" points="'+pts.join(" ")+'"/>'
+    + pts.map(p=>{ const [x,y]=p.split(",");
+        return '<circle class="g-pt" cx="'+x+'" cy="'+y+'" r="2.5"/>'; }).join("")
+    + labels
+    + "</svg>";
+
+  document.getElementById("w-jours").innerHTML = svg;
+}
+
+/* ============================================================
+   VUE 3 — Détail par abonné
+   ============================================================ */
+const COLS_B = [
+  {k:"reference", lab:"Référence"},
+  {k:"statut_saisie", lab:"Statut"},
+  {k:"adresse", lab:"Adresse"},
+  {k:"num_compteur", lab:"N° compteur"},
+  {k:"date_releve", lab:"Date relevé"},
+  {k:"index_fin_p", lab:"Index N-2", num:true},
+  {k:"index_debut", lab:"Index début", num:true},
+  {k:"index_fin", lab:"Index fin", num:true},
+  {k:"etat_compteur", lab:"État compteur"},
+  {k:"type_facture", lab:"Type facture"},
+  {k:"vol_p_cycle", lab:"Volume N-2", num:true},
+  {k:"vol_p", lab:"Référence", num:true},
+  {k:"vol_n", lab:"Volume N", num:true},
+  {k:"ecart", lab:"Écart m³", num:true},
+  {k:"ecart_pct", lab:"Écart %", num:true},
+  {k:"part_baisse", lab:"Part baisse", num:true},
+  {k:"gravite", lab:"Situation"}
+];
+
+const COLS_LB = [
+  {k:"centre_libelle", lab:"Centre"},
+  {k:"secteur_num", lab:"Secteur"},
+  {k:"reference", lab:"Référence"},
+  {k:"adresse", lab:"Adresse"},
+  {k:"num_compteur", lab:"N° compteur"},
+  {k:"index_debut", lab:"Index début", num:true},
+  {k:"index_fin", lab:"Index fin", num:true},
+  {k:"vol_p", lab:"Volume avant", num:true},
+  {k:"vol_n", lab:"Volume après", num:true},
+  {k:"ecart", lab:"Écart m³", num:true},
+  {k:"part_baisse", lab:"Part baisse", num:true}
+];
+
+/* Portée de la liste : le secteur affiché, ou les secteurs d'une liste
+   (journal des alertes). */
+async function voirAbonnesBaisse(portee){
+  if(!portee || portee instanceof Event){
+    const d = S.abonnes || {}, e = d.entete || {};
+    portee = {
+      params: {sect_id: S.secteur},
+      titre: "Abonnés en baisse — " + (e.centre_libelle||"") + " · "
+             + (e.secteur_libelle||"") + (e.secteur_num ? " (n° "+e.secteur_num+")" : "")
+    };
+  }
+  S.lbParams = new URLSearchParams(Object.assign({cycle:S.cycle}, portee.params));
+  /* Bascule sur l'onglet Détail sans relancer son chargement. */
+  S.vue = "abonnes";
+  document.querySelectorAll(".tabs button").forEach(b=>
+    b.classList.toggle("on", b.getAttribute("data-v") === "abonnes"));
+  document.querySelectorAll(".vue").forEach(v=>
+    v.classList.toggle("on", v.id === "v-abonnes"));
+  document.getElementById("card-choix").style.display = "none";
+  document.getElementById("card-ab").style.display = "none";
+  document.getElementById("card-liste-baisse").style.display = "";
+  document.getElementById("t-liste-baisse").textContent = portee.titre;
+  document.getElementById("pills-liste").innerHTML = "";
+  document.getElementById("w-liste-baisse").innerHTML =
+    '<div class="msg">Préparation de la liste…</div>';
+  window.scrollTo(0, 0);
+  try{
+    S.listeBaisse = await jget("/api/abonnes-baisse?"+S.lbParams.toString());
+    S.triLB = S.triLB || {col:"ecart", dir:1};
+    dessinerListeBaisse();
+  }catch(e){
+    document.getElementById("w-liste-baisse").innerHTML =
+      '<div class="msg">'+esc(e.message)+"</div>";
+  }
+}
+
+function dessinerListeBaisse(){
+  const d = S.listeBaisse; if(!d) return;
+  const rows = trier(filtreTexte(d.lignes || [],
+    ["reference","adresse","num_compteur","centre_libelle","secteur_num"]), S.triLB);
+  document.getElementById("pills-liste").innerHTML =
+    '<span class="pill">Secteurs <b>'+n0(d.nb_secteurs)+"</b></span>"
+    + '<span class="pill danger">Abonnés en baisse <b>'+n0(rows.length)+"</b></span>"
+    + '<span class="pill danger">Volume perdu <b>'+n0(d.volume_perdu)+" m³</b></span>";
+  if(!rows.length){
+    document.getElementById("w-liste-baisse").innerHTML =
+      '<div class="msg">Aucun abonné en baisse.</div>';
+    return;
+  }
+  const corps = rows.map(x=>
+    '<tr class="clic" data-s="'+esc(x.centre_code)+"|"+esc(x.secteur_code)+'">'
+    + "<td>"+esc(x.centre_libelle)+"</td>"
+    + '<td class="tnum">'+esc(x.secteur_num)+"</td>"
+    + '<td class="tnum"><b>'+esc(x.reference)+"</b></td>"
+    + '<td style="white-space:normal;max-width:260px">'+esc(x.adresse||"—")+"</td>"
+    + '<td class="tnum">'+esc(x.num_compteur||"—")+"</td>"
+    + '<td class="num tnum">'+n0(x.index_debut)+"</td>"
+    + '<td class="num tnum">'+n0(x.index_fin)+"</td>"
+    + '<td class="num tnum">'+n1(x.vol_p)+"</td>"
+    + '<td class="num tnum">'+n1(x.vol_n)+"</td>"
+    + '<td class="num tnum">'+sgn(x.ecart, n1)+"</td>"
+    + '<td class="num tnum">'+(x.part_baisse ? NF1.format(x.part_baisse)+" %" : "")+"</td></tr>"
+  ).join("");
+  const w = document.getElementById("w-liste-baisse");
+  w.innerHTML = "<table>"+entetes(COLS_LB,S.triLB,"lb")+"<tbody>"+corps+"</tbody></table>";
+  brancherTri(w, "lb", S.triLB, dessinerListeBaisse);
+  w.querySelectorAll("tr[data-s]").forEach(tr=>{
+    tr.onclick = ()=>{
+      const [c, sx] = tr.getAttribute("data-s").split("|");
+      document.getElementById("card-liste-baisse").style.display = "none";
+      allerAuDetail(c, sx);
+    };
+  });
+}
+
+function dessinerChoix(){
+  const actif = String(S.centre || "");
+  const centres = S.centresListe.slice().sort((a,b)=>
+    String(a.centre_libelle).localeCompare(String(b.centre_libelle), "fr"));
+  const cen = centres.map(c=>
+    '<button class="ch-centre'+(String(c.centre_code) === actif ? " on" : "")
+    + '" data-c="'+esc(c.centre_code)+'"><span>'+esc(c.centre_libelle)
+    + '</span><span class="pastille">'+n0(c.nb_secteurs)+"</span></button>").join("");
+  let sec;
+  if(!actif){
+    sec = '<div class="ch-vide">Choisis un centre</div>';
+  }else{
+    const liste = S.secteursListe.slice().sort((a,b)=>
+      (parseInt(a.secteur_num,10)||0) - (parseInt(b.secteur_num,10)||0)
+      || String(a.secteur_num).localeCompare(String(b.secteur_num), "fr"));
+    sec = liste.length
+      ? '<div class="ch-sects">' + liste.map(x=>
+          '<button class="ch-sect" data-sx="'+esc(x.secteur_code)+'">'
+          + '<span class="ch-num">'+esc(x.secteur_num)+"</span>"
+          + '<span class="ch-lib" title="'+esc(x.secteur_libelle)+'">'
+          + esc(x.secteur_libelle)+"</span>"
+          + barre(x.pct_saisie)+"</button>").join("") + "</div>"
+      : '<div class="ch-vide">Aucun secteur sur ce cycle</div>';
+  }
+  const nom = (centres.find(c=>String(c.centre_code) === actif)||{}).centre_libelle;
+  const w = document.getElementById("w-choix");
+  w.innerHTML = '<div class="ch-grid"><div class="ch-centres">'+cen+"</div><div>"
+    + (nom ? '<p class="card-t" style="margin:0 0 14px">'+esc(nom)+"</p>" : "")
+    + sec + "</div></div>";
+  w.querySelectorAll("button[data-c]").forEach(b=>{
+    b.onclick = async ()=>{
+      S.centre = b.getAttribute("data-c"); S.secteur = "";
+      document.getElementById("sel-centre").value = S.centre;
+      await chargerSecteursListe();
+      dessinerChoix();
+    };
+  });
+  w.querySelectorAll("button[data-sx]").forEach(b=>{
+    b.onclick = ()=>{
+      S.secteur = b.getAttribute("data-sx");
+      document.getElementById("sel-secteur").value = S.secteur;
+      chargerAbonnes();
+    };
+  });
+}
+
+async function chargerAbonnes(){
+  document.getElementById("card-liste-baisse").style.display = "none";
+  const choix = document.getElementById("card-choix");
+  const carte = document.getElementById("card-ab");
+
+  if(!S.secteur){
+    carte.style.display = "none";
+    choix.style.display = "";
+    dessinerChoix();
+    return;
+  }
+
+  choix.style.display = "none";
+  carte.style.display = "";
+  document.getElementById("w-ab").innerHTML =
+    '<div class="msg">Chargement des abonnés…</div>';
+
+  const sect = secteurCourant();
+  const strId = S.centre || (sect ? sect.centre_code : null);
+  if(strId === null || strId === undefined){
+    document.getElementById("w-ab").innerHTML =
+      '<div class="msg">Centre introuvable pour ce secteur.</div>';
+    return;
+  }
+
+  const p = new URLSearchParams({cycle:S.cycle, str_id:strId,
+                                 sect_id:S.secteur});
+  try{
+    S.abonnes = await jget("/api/abonnes?"+p.toString());
+    S.triB = {col:"ecart", dir:1};
+    dessinerAbonnes(); majCompteurs();
+  }catch(e){
+    document.getElementById("w-ab").innerHTML =
+      '<div class="msg">'+esc(e.message)+"</div>";
+  }
+}
+
+function dessinerAbonnes(){
+  const d = S.abonnes; if(!d) return;
+  const e = d.entete || {}, r = d.resume || {};
+
+  document.getElementById("t-ab").textContent =
+    (e.centre_libelle||"Centre") + " · " + (e.secteur_libelle||"Secteur")
+    + (e.secteur_num ? " (n° "+e.secteur_num+")" : "");
+  document.getElementById("sub-ab").textContent =
+    (d.comparaison === "N-1" ? "Gros consommateur — mois " : "Cycle ")
+    + d.cycle + " comparé au " + (d.comparaison === "N-1" ? "mois " : "cycle ")
+    + d.cycle_precedent
+    + " — volume " + n0(e.vol_n) + " m³ contre " + n0(e.vol_p) + " m³"
+    + (e.etat ? " — " + (LIB_ETAT[e.etat]||e.etat) : "");
+
+  document.getElementById("pills-ab").innerHTML = [
+    '<span class="pill">Abonnés facturés <b>'+n0(r.nb_abonnes)+"</b></span>",
+    '<span class="pill danger">En baisse <b>'+n0(r.nb_en_baisse)+"</b></span>",
+    (r.nb_80pct ? '<span class="pill danger"><b>'+n0(r.nb_80pct)
+      +"</b> abonné(s) = 80 % de la baisse</span>" : ""),
+    (r.nb_perdus ? '<span class="pill">Abonnés perdus <b>'+n0(r.nb_perdus)
+      +"</b> · "+n0(r.vol_perdus)+" m³</span>" : ""),
+    '<span class="pill danger">À 0 m³ <b>'+n0(r.nb_volume_nul)+"</b></span>",
+    '<span class="pill danger">Volume perdu <b>'+n0(r.volume_perdu)+" m³</b></span>"
+  ].join("");
+
+  let base = d.lignes || [];
+  if(S.statutAb) base = base.filter(x=>x.statut_saisie === S.statutAb);
+  if(S.abBaisse) base = base.filter(x=>(x.ecart||0) < 0);
+  const rows = trier(
+    filtreTexte(base, ["reference","adresse","num_compteur","quartier",
+                       "ancienne_reference"]),
+    S.triB);
+
+  if(!rows.length){
+    document.getElementById("w-ab").innerHTML =
+      '<div class="msg">Aucun abonné pour ces critères.</div>';
+    return;
+  }
+
+  const corps = rows.map(x=>{
+    const bloque = (x.index_fin!==null && x.index_fin_p!==null
+                    && x.index_fin === x.index_fin_p)
+      ? ' <span class="b b-LEGERE">index figé</span>' : "";
+    const adresse = [x.adresse, x.complement_adresse]
+      .filter(Boolean).join(" — ") || "—";
+    return '<tr class="g-'+esc(x.gravite)+'">'
+      + '<td class="tnum"><b>'+esc(x.reference)+"</b></td>"
+      + "<td>"+bSaisie(x.statut_saisie)+"</td>"
+      + '<td style="white-space:normal;max-width:280px">'+esc(adresse)
+        + (x.quartier ? '<br><span class="mut" style="font-size:11px">'
+            + esc(x.quartier)+"</span>" : "")+"</td>"
+      + '<td class="tnum">'+esc(x.num_compteur||"—")+"</td>"
+      + '<td class="tnum mut">'+jour(x.date_releve)+"</td>"
+      + '<td class="num tnum">'+n0(x.index_fin_p)+"</td>"
+      + '<td class="num tnum">'+n0(x.index_debut)+"</td>"
+      + '<td class="num tnum">'+n0(x.index_fin)+bloque+"</td>"
+      + "<td>"+esc(x.etat_compteur||"—")+"</td>"
+      + "<td>"+esc(x.type_facture||"—")+"</td>"
+      + '<td class="num tnum mut">'+n1(x.vol_p_cycle)+"</td>"
+      + '<td class="num tnum">'+n1(x.vol_p)+"</td>"
+      + '<td class="num tnum">'+n1(x.vol_n)+"</td>"
+      + '<td class="num tnum">'+sgn(x.ecart, n1)+"</td>"
+      + '<td class="num tnum">'+sgn(x.ecart_pct, v=>NF1.format(v)+" %")+"</td>"
+      + '<td class="num tnum">'+(x.part_baisse ? '<b class="neg">'
+          + NF1.format(x.part_baisse)+" %</b>" : "")+"</td>"
+      + "<td>"+bGravite(x.gravite)+"</td></tr>";
+  }).join("");
+
+  const w = document.getElementById("w-ab");
+  const colsB = d.comparaison === "N-1"
+    ? COLS_B.map(c=>Object.assign({}, c, {lab:c.lab.replace("N-2","N-1")}))
+    : COLS_B;
+  w.innerHTML = "<table>"+entetes(colsB,S.triB,"b")+"<tbody>"+corps+"</tbody></table>";
+  brancherTri(w, "b", S.triB, dessinerAbonnes);
+}
+
+/* ============================================================
+   Téléchargements
+   ============================================================ */
+async function telecharger(url, bouton){
+  const txt = bouton.innerHTML;
+  bouton.disabled = true; bouton.textContent = "Préparation…";
+  try{
+    const r = await fetch(url, {cache:"no-store"});
+    if(!r.ok){
+      let d = r.status + " " + r.statusText;
+      try { const j = await r.json(); if(j.detail) d = j.detail; } catch(e){}
+      throw new Error(d);
+    }
+    const blob = await r.blob();
+    const cd = r.headers.get("Content-Disposition") || "";
+    const m = /filename="?([^"]+)"?/.exec(cd);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = m ? m[1] : "export.xlsx";
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  }catch(e){
+    erreur("Échec de l'export : " + e.message);
+  }finally{
+    bouton.disabled = false; bouton.innerHTML = txt;
+  }
+}
+
+/* ============================================================
+   Branchements
+   ============================================================ */
+/* ============================================================
+   Actualisation automatique — appelée à chaque passage du watcher
+   ============================================================ */
+let actualisationEnCours = false;
+async function actualiserSilencieux(){
+  if(actualisationEnCours || !S.cycle) return;
+  actualisationEnCours = true;
+
+  /* Positions de défilement, pour ne pas faire sauter la page. */
+  const pos = {};
+  document.querySelectorAll(".twrap[id]").forEach(w=>{
+    pos[w.id] = [w.scrollTop, w.scrollLeft];
+  });
+  const y = window.scrollY;
+
+  S.silence = true;
+  try{
+    /* Un nouveau cycle apparu dans Oracle s'ajoute aux listes, sans
+       changer le cycle affiché. */
+    try{
+      const d = await jget("/api/cycles");
+      if((d.cycles||[]).length !== S.cycles.length
+         || (d.cycles[0]||{}).cycle_key !== (S.cycles[0]||{}).cycle_key){
+        S.cycles = d.cycles || []; S.annees = d.annees || [];
+        document.getElementById("sel-annee").innerHTML = S.annees.map(a=>
+          '<option value="'+a+'"'+(a===S.annee?" selected":"")+">"+a
+          +"</option>").join("");
+        remplirCyclesDeLAnnee();
+      }
+    }catch(e){ /* sans gravité */ }
+
+    const t = [majEtat(), majBandeau(false), majBandeauRetard(false),
+               chargerTout()];
+    if(S.vue === "gros") t.push(chargerGros());
+    else if(S.vue === "avancement") t.push(chargerAvancement());
+    else if(S.vue === "retards") t.push(chargerRetards());
+    else if(S.vue === "abonnes" && S.secteur) t.push(chargerAbonnes());
+    if(document.getElementById("card-alertes").style.display !== "none")
+      t.push(ouvrirAlertes());
+    if(document.getElementById("card-al-retard").style.display !== "none")
+      t.push(ouvrirAlertesRetard());
+    await Promise.all(t);
+  }finally{
+    S.silence = false;
+    actualisationEnCours = false;
+    for(const id in pos){
+      const w = document.getElementById(id);
+      if(w){ w.scrollTop = pos[id][0]; w.scrollLeft = pos[id][1]; }
+    }
+    window.scrollTo(0, y);
+  }
+}
+
+function rechargerVueCourante(){
+  if(S.vue === "baisses") chargerSecteurs();
+  else if(S.vue === "gros") chargerGros();
+  else if(S.vue === "avancement") chargerAvancement();
+  else if(S.vue === "retards") chargerRetards();
+  else chargerAbonnes();
+}
+
+document.getElementById("tabs").onclick = (ev)=>{
+  const b = ev.target.closest("button[data-v]");
+  if(b) ouvrirVue(b.getAttribute("data-v"));
+};
+
+let tq = null;
+document.getElementById("in-q").oninput = (ev)=>{
+  clearTimeout(tq);
+  tq = setTimeout(()=>{
+    S.q = ev.target.value;
+    if(S.vue === "baisses") dessinerSecteurs();
+    else if(S.vue === "gros") dessinerGrosSecteurs();
+    else if(S.vue === "avancement") dessinerAvancement();
+    else if(S.vue === "retards") dessinerRetards();
+    else if(S.abonnes) dessinerAbonnes();
+  }, 220);
+};
+
+document.getElementById("sel-annee").onchange = async (ev)=>{
+  S.annee = Number(ev.target.value);
+  remplirCyclesDeLAnnee();
+  S.centre = ""; S.secteur = "";
+  await chargerListes();
+  S.avancement = []; S.retards = []; S.abonnes = null; S.gSynthese = null;
+  chargerTout(); rechargerVueCourante();
+};
+document.getElementById("sel-cycle").onchange = async (ev)=>{
+  S.cycle = Number(ev.target.value);
+  await chargerListes();
+  S.avancement = []; S.retards = []; S.abonnes = null; S.gSynthese = null;
+  chargerTout(); rechargerVueCourante();
+};
+document.getElementById("sel-zone").onchange = async (ev)=>{
+  S.zone = ev.target.value; S.centre = ""; S.secteur = "";
+  await chargerListes();
+  S.avancement = []; S.retards = []; S.abonnes = null; S.gSynthese = null;
+  chargerTout(); rechargerVueCourante();
+};
+document.getElementById("sel-centre").onchange = async (ev)=>{
+  S.centre = ev.target.value; S.secteur = "";
+  dessinerCentres(); if(S.gSynthese) dessinerGrosCentres();
+  await chargerSecteursListe();
+  S.avancement = []; S.retards = []; S.abonnes = null; S.gSynthese = null;
+  rechargerVueCourante();
+};
+document.getElementById("sel-secteur").onchange = (ev)=>{
+  S.secteur = ev.target.value;
+  S.avancement = []; S.retards = []; S.abonnes = null; S.gSynthese = null;
+  rechargerVueCourante();
+};
+document.getElementById("btn-reset").onclick = async ()=>{
+  S.centre = ""; S.secteur = ""; S.q = ""; S.minPct = 0; S.toutes = false;
+  S.zone = ""; document.getElementById("sel-zone").value = "";
+  S.gMin = 0; S.gToutes = false;
+  document.getElementById("cb-toutes-g").checked = false;
+  S.etatAv = ""; S.statutAb = ""; S.abBaisse = false;
+  S.filtreRt = "A_TRAITER";
+  document.getElementById("sel-centre").value = "";
+  document.getElementById("in-q").value = "";
+  document.getElementById("cb-toutes").checked = false;
+  document.getElementById("sel-etat").value = "";
+  document.getElementById("sel-statut").value = "";
+  document.getElementById("cb-ab-baisse").checked = false;
+  await chargerSecteursListe();
+  S.avancement = []; S.retards = []; S.abonnes = null; S.gSynthese = null;
+  chargerTout(); rechargerVueCourante();
+};
+
+document.getElementById("cb-toutes").onchange = (ev)=>{
+  S.toutes = ev.target.checked; chargerSecteurs();
+};
+document.getElementById("cb-toutes-g").onchange = (ev)=>{
+  S.gToutes = ev.target.checked; chargerGrosSecteurs();
+};
+document.getElementById("btn-xls-g").onclick = (ev)=>{
+  const p = qsCycle({population:"mensuel"});
+  if(S.gMin>0) p.set("baisse_min_pct", S.gMin);
+  if(S.gToutes) p.set("toutes","true");
+  telecharger("/api/export/secteurs?"+p.toString(), ev.currentTarget);
+};
+document.getElementById("cb-nonlues").onchange = (ev)=>{
+  S.nonLues = ev.target.checked; ouvrirAlertes();
+};
+document.getElementById("btn-xls-alertes").onclick = (ev)=>{
+  telecharger("/api/export/alertes?cycle=" + cleMoisCourant(), ev.currentTarget);
+};
+document.getElementById("btn-ab-alertes").onclick = ()=>{
+  const sects = [...new Set((S.alertes||[]).map(r=>r.secteur_code))];
+  if(!sects.length){ erreur("Aucune alerte sur ce cycle."); return; }
+  voirAbonnesBaisse({
+    params: {sects: sects.join(",")},
+    titre: "Abonnés en baisse — " + sects.length + " secteur(s) en alerte"
+  });
+};
+document.getElementById("btn-fermer-alertes").onclick = ()=>{
+  document.getElementById("card-alertes").style.display = "none";
+};
+document.getElementById("sel-etat").onchange = (ev)=>{
+  S.etatAv = ev.target.value; chargerAvancement();
+};
+document.getElementById("btn-fermer-jours").onclick = ()=>{
+  document.getElementById("card-jours").style.display = "none";
+};
+document.getElementById("sel-statut").onchange = (ev)=>{
+  S.statutAb = ev.target.value; dessinerAbonnes();
+};
+document.getElementById("cb-ab-baisse").onchange = (ev)=>{
+  S.abBaisse = ev.target.checked; dessinerAbonnes();
+};
+
+document.getElementById("btn-fermer-al-retard").onclick = ()=>{
+  document.getElementById("card-al-retard").style.display = "none";
+};
+document.getElementById("btn-xls-rt").onclick = (ev)=>{
+  /* Le classeur contient de toute façon une feuille par situation ;
+     on ne restreint que si une situation unique est sélectionnée. */
+  const p = qsCycle();
+  if(S.secteur) p.set("sect_id", S.secteur);
+  const g = groupeRt();
+  if(g.urgences && g.urgences.length === 1) p.set("urgence", g.urgences[0]);
+  telecharger("/api/export/retards?"+p.toString(), ev.currentTarget);
+};
+document.getElementById("bandr-voir").onclick = consulterRetards;
+document.getElementById("bandr-xls").onclick = (ev)=>{
+  telecharger("/api/export/retards?"+qsCycle({urgence:"EN_RETARD"}).toString(),
+              ev.currentTarget);
+};
+
+document.getElementById("btn-refresh").onclick = async (ev)=>{
+  const b = ev.currentTarget, lib = b.querySelector("span"), t = lib.textContent;
+  b.disabled = true; b.classList.add("tourne");
+  lib.textContent = "Interrogation d'Oracle…";
+  erreur("");
+  try{
+    await jpost("/api/refresh?complet=true");
+    await majEtat();
+    await majBandeau(false); await majBandeauRetard(false);
+    await chargerListes();
+    S.avancement = []; S.retards = []; S.abonnes = null; S.gSynthese = null;
+    chargerTout(); rechargerVueCourante();
+  }catch(e){
+    erreur(e.message);
+  }finally{
+    b.disabled = false; b.classList.remove("tourne"); lib.textContent = t;
+  }
+};
+
+document.getElementById("btn-xls").onclick = (ev)=>{
+  const p = qsCycle();
+  if(S.minPct>0) p.set("baisse_min_pct", S.minPct);
+  if(S.toutes) p.set("toutes","true");
+  telecharger("/api/export/secteurs?"+p.toString(), ev.currentTarget);
+};
+document.getElementById("btn-xls-av").onclick = (ev)=>{
+  const p = qsCycle();
+  if(S.secteur) p.set("sect_id", S.secteur);
+  if(S.etatAv) p.set("statut", S.etatAv);
+  telecharger("/api/export/avancement?"+p.toString(), ev.currentTarget);
+};
+document.getElementById("btn-voir-baisses-ab").onclick = ()=>voirAbonnesBaisse();
+document.getElementById("btn-retour-liste").onclick = ()=>{
+  document.getElementById("card-liste-baisse").style.display = "none";
+  chargerAbonnes();
+};
+document.getElementById("btn-xls-liste").onclick = (ev)=>{
+  telecharger("/api/export/abonnes-baisse?"+(S.lbParams||qsCycle()).toString(),
+              ev.currentTarget);
+};
+document.getElementById("btn-retour-ab").onclick = ()=>{
+  S.secteur = ""; S.abonnes = null;
+  document.getElementById("sel-secteur").value = "";
+  chargerAbonnes(); majCompteurs();
+};
+document.getElementById("btn-xls-ab").onclick = (ev)=>{
+  if(!S.secteur) return;
+  const sect = secteurCourant();
+  const strId = S.centre || (sect ? sect.centre_code : "");
+  const p = new URLSearchParams({cycle:S.cycle, str_id:strId,
+                                 sect_id:S.secteur});
+  telecharger("/api/export/references?"+p.toString(), ev.currentTarget);
+};
+document.getElementById("band-voir").onclick = consulterAlertes;
+document.getElementById("band-xls").onclick = (ev)=>{
+  telecharger("/api/export/alertes?cycle=" + cleMoisCourant(), ev.currentTarget);
+};
+
+/* ============================================================
+   Démarrage
+   ============================================================ */
+(async function(){
+  majEtat();
+  brancherSSE();
+  majBandeau(false);
+  majBandeauRetard(false);
+  setInterval(()=>{ majBandeau(false); majBandeauRetard(false); }, 60000);
+  setInterval(majEtat, 60000);
+
+  try{
+    await chargerCycles();
+  }catch(e){
+    erreur(e.message);
+    return;
+  }
+  if(!S.cycle){
+    erreur("Aucun cycle dans la base locale. Lance : python -m src.etl");
+    return;
+  }
+  await chargerListes();
+  chargerTout();
+})();
+</script>
+</body>
+</html>
