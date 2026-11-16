@@ -18,9 +18,9 @@ COEF_PLAFOND = 1.2
 #   "minimum"  = objectif de CHAQUE centre >= 1,2 x son Pic (total très élevé : les pics sont à des mois différents)
 #   "maximum"  = objectif de chaque centre <= 1,2 x son Pic
 SENS_REGLE_DG = "minimum"
-# Définition du Pic : "meilleur" = meilleur mois 2026 ; "2e_meilleur" = 2e meilleur mois 2026
-# (écarte le record isolé : le Pic doit avoir été atteint au moins deux fois)
-DEFINITION_PIC = "2e_meilleur"
+# TOTAL mensuel visé (mode "minimum") : au-dessus, la part au-dessus du minimum COEF_PLAFOND x Pic
+# est réduite ; en dessous, tous les centres sont relevés dans la même proportion. None = libre.
+OBJECTIF_MAX_MOIS = 184_000_000
 
 # Progression maximale par rapport à l'encaissement moyen 2026 (0.50 = +50 %).
 # Évite les objectifs irréalistes quand le pic 2026 est exceptionnel.

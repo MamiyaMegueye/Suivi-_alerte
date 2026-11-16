@@ -204,11 +204,7 @@ def construire_panel():
     col_pic = "encaissement" if P("PIC_HORS_EXCEPTIONNELS", True) else "encaissement_brut"
     e_pic = e[e["mois"].str.startswith(str(C.ANNEE_PIC)) & (e["mois"] <= C.MOIS_FIN)]
     if len(e_pic):
-        rang = 2 if P("DEFINITION_PIC", "meilleur") == "2e_meilleur" else 1
-        tri = e_pic.sort_values(col_pic, ascending=False)
-        # rang 1 = meilleur mois ; rang 2 = 2e meilleur mois (le record isolé est écarté)
-        sel = tri.groupby("centre").head(rang).groupby("centre").tail(1)
-        idx = sel.index
+        idx = e_pic.groupby("centre")[col_pic].idxmax()
         PIC.update(e_pic.loc[idx].set_index("centre")[[col_pic, "mois"]]
                    .rename(columns={col_pic: "pic", "mois": "mois_pic"}).to_dict("index"))
     else:
@@ -589,6 +585,19 @@ def lire_arrieres():
     return a.groupby("centre")["arrieres"].sum()
 
 
+def plafonner_total(obj, plancher, etat, cap):
+    """Ramène le total du mois à `cap` en réduisant seulement la part AU-DESSUS du minimum
+    1,2 x Pic (proportionnellement) ; aucun centre ne descend sous son minimum."""
+    obj = np.asarray(obj, float); plancher = np.asarray(plancher, float)
+    if cap is None or obj.sum() + float(np.sum(etat)) <= cap + 0.5:
+        return obj, True
+    marge = np.clip(obj - plancher, 0, None)
+    reste = cap - float(np.sum(etat)) - plancher.sum()
+    if reste <= 0 or marge.sum() <= 0:
+        return np.maximum(obj, plancher) if reste > 0 else plancher.copy(), False
+    return plancher + marge * (reste / marge.sum()), True
+
+
 def calculer_objectifs(p, m):
     print("\n[3] Calcul des objectifs")
     cible = C.OBJECTIF_NATIONAL / 12 if C.PERIODE_OBJECTIF == "annuel" else C.OBJECTIF_NATIONAL
@@ -685,6 +694,19 @@ def calculer_objectifs(p, m):
                f"({'respecté' if tot_m >= INFO['minimum_national'] - 1 else 'NON respecté'})")
     elif minimum_dg:
         r["objectif_du_mois"] = np.maximum(r["objectif_calcule"] * r["indice_saisonnier"], r["plafond_pic"])
+        cap = P("OBJECTIF_MAX_MOIS", None)
+        tot0 = r["objectif_du_mois"].sum() + r["objectif_etat"].sum()
+        if cap and tot0 < cap - 0.5:
+            # total sous la cible : tous les centres sont relevés dans la même proportion
+            r["objectif_du_mois"] = r["objectif_du_mois"] * (cap - r["objectif_etat"].sum()) / r["objectif_du_mois"].sum()
+            alerte(f"Total du mois porté à {cap:,.0f} (au lieu de {tot0:,.0f}) : +{cap / tot0 - 1:.1%} pour chaque centre")
+        elif cap and tot0 > cap + 0.5:
+            om, ok = plafonner_total(r["objectif_du_mois"], r["plafond_pic"], r["objectif_etat"], cap)
+            r["objectif_du_mois"] = om
+            alerte(f"Total du mois limité à {cap:,.0f} : la part au-dessus du minimum est réduite "
+                   + ("(aucun centre sous son minimum)" if ok else
+                      f"— IMPOSSIBLE : les minimums {C.COEF_PLAFOND:g} x Pic font déjà "
+                      f"{r['plafond_pic'].sum():,.0f} ; baissez COEF_PLAFOND"))
         nb_rel = int((r["plafond_pic"] > r["objectif_calcule"] + 0.5).sum())
         alerte(f"Règle du DG appliquée comme MINIMUM (objectif >= {C.COEF_PLAFOND:g} x Pic 2026) : "
                f"{nb_rel} centre(s) relevé(s) ; total du mois {(r['objectif_du_mois'] + r['objectif_etat']).sum():,.0f} "
@@ -692,7 +714,7 @@ def calculer_objectifs(p, m):
         if prog_max is not None:
             conflit = int((r["plafond_pic"] > r["plafond_progression"] + 0.5).sum())
             if conflit:
-                alerte(f"{conflit} centre(s) où le minimum 1,2 x Pic dépasse la limite +{prog_max:.0%} : "
+                alerte(f"{conflit} centre(s) où le minimum {C.COEF_PLAFOND:g} x Pic dépasse la limite +{prog_max:.0%} : "
                        f"la règle du DG l'emporte")
     else:
         r["objectif_du_mois"] = np.minimum(r["objectif_mensuel"] * r["indice_saisonnier"], r["plafond_pic"])
@@ -805,7 +827,12 @@ def exporter(res, poids, m, info, p, validation):
                 om, _, _ = repartir(om.values, np.asarray(res["plafond"], float) * np.ones(len(res)) * i, mini)
             m12[mo] = om + res["objectif_etat"]
         elif INFO.get("minimum_dg"):
-            m12[mo] = np.maximum(res["objectif_calcule"] * i, res["plafond_pic"]) + res["objectif_etat"]
+            om = np.maximum(res["objectif_calcule"] * i, res["plafond_pic"])
+            cap = P("OBJECTIF_MAX_MOIS", None)
+            om, _ = plafonner_total(om, res["plafond_pic"], res["objectif_etat"], cap)
+            if cap and om.sum() + res["objectif_etat"].sum() < cap - 0.5:
+                om = om * (cap - res["objectif_etat"].sum()) / om.sum()
+            m12[mo] = om + res["objectif_etat"]
         else:
             m12[mo] = np.minimum(res["objectif_mensuel"] * i, res["plafond_pic"]) + res["objectif_etat"]
     tot12 = {"centre": "TOTAL", "nom_centre": "", "zone": "", **{mo: m12[mo].sum() for mo in prochains}}
