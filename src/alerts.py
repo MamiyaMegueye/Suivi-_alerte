@@ -5,8 +5,10 @@ Deux alertes distinctes
 -----------------------
 **Baisse de facturation — rouge.** Levée quand un secteur est
 RÉELLEMENT FACTURÉ (au moins une facture émise sur le cycle) et que son
-volume facturé est inférieur à celui du cycle N-2. Toute baisse compte,
-aussi petite soit-elle.
+volume baisse par rapport au cycle N-2 (N-1 pour les gros consommateurs) :
+volume facturé TOTAL baisse d'au moins SEUIL_BAISSE_M3 m³ (1000 par défaut).
+La cause principale est notée : abonnés constants ou abonnés perdus.
+Règle : queries.cond_alerte().
 
 Attendre la facturation est le point clé : un secteur clôturé mais pas
 encore facturé a un volume incomplet, et un secteur à 40 % de saisie est
@@ -125,9 +127,9 @@ def detecter() -> int:
                       (alert_id, cycle_key, ANNEE, MOIS, STR_ID, SECT_ID,
                        vol_n, vol_p, vol_total_n, vol_total_p,
                        ecart, ecart_pct, ecart_total, ecart_total_pct,
-                       gravite, etat, fiabilite, comparaison,
+                       gravite, etat, fiabilite, comparaison, cause,
                        detected_at, updated_at, acknowledged, acknowledged_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,FALSE,NULL)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,FALSE,NULL)
                 """, [
                     nid, ck, annee, mois, str_id, sect_id,
                     s.get("vol_n"), s.get("vol_p"),
@@ -135,7 +137,7 @@ def detecter() -> int:
                     s.get("ecart"), s.get("ecart_pct"),
                     s.get("ecart_total"), s.get("ecart_total_pct"),
                     s.get("gravite"), s.get("etat"), s.get("fiabilite"),
-                    s.get("comparaison"),
+                    s.get("comparaison"), s.get("cause"),
                     maintenant, maintenant,
                 ])
                 nouvelles += 1
@@ -148,7 +150,7 @@ def detecter() -> int:
                         ecart = ?, ecart_pct = ?,
                         ecart_total = ?, ecart_total_pct = ?,
                         gravite = ?, etat = ?, fiabilite = ?,
-                        comparaison = ?, updated_at = ?
+                        comparaison = ?, cause = ?, updated_at = ?
                     WHERE alert_id = ?
                 """, [
                     s.get("vol_n"), s.get("vol_p"),
@@ -156,7 +158,7 @@ def detecter() -> int:
                     s.get("ecart"), s.get("ecart_pct"),
                     s.get("ecart_total"), s.get("ecart_total_pct"),
                     s.get("gravite"), s.get("etat"), s.get("fiabilite"),
-                    s.get("comparaison"),
+                    s.get("comparaison"), s.get("cause"),
                     maintenant, existe,
                 ])
 
@@ -194,7 +196,7 @@ _SELECT = """
                  '(secteur ' || CAST(a.SECT_ID AS VARCHAR) || ')')
                                               AS secteur_libelle,
         a.vol_n, a.vol_p, a.vol_total_n, a.vol_total_p, a.ecart, a.ecart_pct, a.ecart_total, a.ecart_total_pct,
-        a.gravite, a.etat, a.fiabilite,
+        a.gravite, a.etat, a.fiabilite, a.cause,
         COALESCE(a.comparaison, 'N-2')        AS comparaison,
         a.detected_at, a.updated_at, a.acknowledged, a.acknowledged_at
     FROM alertes_baisse a
@@ -221,7 +223,7 @@ def lister(
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
 
     rows = db.lignes(
-        f"{_SELECT} {where} ORDER BY a.ecart ASC NULLS LAST "
+        f"{_SELECT} {where} ORDER BY a.ecart_total ASC NULLS LAST "
         f"LIMIT {int(limit)}",
         params,
     )
@@ -247,11 +249,21 @@ def compter(only_unack: bool = True, cycle: int | None = None) -> dict:
         params.append(int(cycle))
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
 
+    # Seules les PERTES sont additionnées : un secteur en alerte pour son
+    # volume total peut avoir des abonnés constants en hausse, qui ne
+    # doivent pas venir réduire la perte affichée.
     row = db.ligne(f"""
         SELECT
             COUNT(*)                                    AS n,
             COUNT(DISTINCT STR_ID)                      AS nb_centres,
-            CAST(COALESCE(SUM(-ecart), 0) AS BIGINT)    AS volume_perdu,
+            CAST(COALESCE(SUM(-ecart) FILTER (WHERE ecart < 0), 0)
+                 AS BIGINT)                             AS volume_perdu,
+            CAST(COALESCE(SUM(-ecart_total) FILTER (WHERE ecart_total < 0), 0)
+                 AS BIGINT)                             AS baisse_totale,
+            COUNT(*) FILTER (WHERE cause = '{queries.CAUSE_CONSTANTS}')
+                                                        AS nb_cause_constants,
+            COUNT(*) FILTER (WHERE cause = '{queries.CAUSE_PERDUS}')
+                                                        AS nb_cause_perdus,
             COUNT(*) FILTER (WHERE gravite = 'FORTE')   AS nb_forte,
             COUNT(*) FILTER (WHERE gravite = 'DISPARU') AS nb_disparus,
             MAX(detected_at)                            AS derniere
@@ -261,6 +273,10 @@ def compter(only_unack: bool = True, cycle: int | None = None) -> dict:
         "n": int(row.get("n") or 0),
         "nb_centres": int(row.get("nb_centres") or 0),
         "volume_perdu": int(row.get("volume_perdu") or 0),
+        "baisse_totale": int(row.get("baisse_totale") or 0),
+        "nb_cause_constants": int(row.get("nb_cause_constants") or 0),
+        "nb_cause_perdus": int(row.get("nb_cause_perdus") or 0),
+        "seuil_m3": float(config.SEUIL_BAISSE_M3),
         "nb_forte": int(row.get("nb_forte") or 0),
         "nb_disparus": int(row.get("nb_disparus") or 0),
         "derniere": row.get("derniere"),

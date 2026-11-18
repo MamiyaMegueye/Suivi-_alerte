@@ -447,6 +447,7 @@ async def refresh(
             "nouvelles": r["nouvelles_alertes"],
             "total_non_lues": c["n"],
             "volume_perdu": c["volume_perdu"],
+            "baisse_totale": c["baisse_totale"],
             "nb_centres": c["nb_centres"],
         })
     if r.get("nouvelles_alertes_retard"):
@@ -478,13 +479,16 @@ _COLS_SECTEUR = {
     "nb_factures_n": "Factures N",
     "nb_factures_p": "Factures N-2",
     "nb_abonnes_compares": "Abonnés comparés",
-    "vol_p_cycle": "Volume N-2 (m3)",
-    "vol_p": "Référence (m3)",
-    "vol_n": "Volume N (m3)",
-    "ecart": "Écart (m3)",
-    "ecart_pct": "Écart (%)",
     "nb_perdus": "Abonnés perdus",
+    "nb_ajoutes": "Abonnés ajoutés",
     "vol_perdus": "Volume des perdus (m3)",
+    "vol_total_p": "Volume total N-2 (m3)",
+    "vol_total_n": "Volume total N (m3)",
+    "vol_total_hors_grp_p": "Volume total N-2 sans groupés (m3)",
+    "vol_total_hors_grp_n": "Volume total N sans groupés (m3)",
+    "ecart_total": "Écart volume total (m3)",
+    "ecart_total_pct": "Écart volume total (%)",
+    "cause": "Cause principale",
     "gravite": "Gravité",
 }
 
@@ -538,7 +542,6 @@ _COLS_REF = {
     "num_facture": "N° facture N",
     "date_facture": "Date facture N",
     "vol_p_cycle": "Volume N-2 (m3)",
-    "vol_p": "Référence (m3)",
     "vol_n": "Volume N (m3)",
     "ecart": "Écart (m3)",
     "ecart_pct": "Écart (%)",
@@ -571,11 +574,12 @@ _COLS_CENTRE = {
     "nb_disparus": "Secteurs disparus",
     "nb_perdus": "Abonnés perdus",
     "vol_perdus": "Volume des perdus (m3)",
-    "vol_p": "Référence (m3)",
+    "vol_p": "Volume N-2 (m3)",
     "vol_n": "Volume N (m3)",
     "ecart": "Écart (m3)",
     "ecart_pct": "Écart (%)",
-    "volume_perdu": "Volume perdu (m3)",
+    "volume_perdu": "Volume perdu abonnés constants (m3)",
+    "baisse_totale": "Baisse du volume total (m3)",
     "gravite": "Gravité",
 }
 

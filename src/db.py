@@ -260,6 +260,10 @@ def _creer_schema(con: duckdb.DuckDBPyConnection) -> None:
                 "ADD COLUMN IF NOT EXISTS ecart_total DOUBLE")
     con.execute("ALTER TABLE alertes_baisse "
                 "ADD COLUMN IF NOT EXISTS ecart_total_pct DOUBLE")
+    # Cause principale de la baisse (16/11/2026) : « Abonnés constants »
+    # ou « Abonnés perdus ».
+    con.execute("ALTER TABLE alertes_baisse "
+                "ADD COLUMN IF NOT EXISTS cause VARCHAR")
     for ddl in INDEX:
         try:
             con.execute(ddl)

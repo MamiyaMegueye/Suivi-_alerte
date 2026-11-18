@@ -137,8 +137,17 @@ HISTORIQUE_MOIS = _ent("HISTORIQUE_MOIS", 24)
 # ============================================================
 # Règle d'alerte
 # ============================================================
-# Toute baisse du volume facturé est une alerte. L'écart est donné en m³
-# et en pourcentage ; le seuil ci-dessous n'est qu'un filtre d'affichage.
+# Seuil d'alerte, en m³ par secteur. Un secteur est en alerte quand son
+# volume facturé TOTAL baisse d'au moins SEUIL_BAISSE_M3 (N vs N-2, ou
+# N vs N-1 pour les gros consommateurs). La cause principale est ensuite
+# indiquée : abonnés constants en baisse, ou abonnés perdus.
+# Mettre SEUIL_BAISSE_M3=0 pour retenir toute baisse, aussi petite soit-elle.
+try:
+    SEUIL_BAISSE_M3 = max(0.0, float(_txt("SEUIL_BAISSE_M3", "1000") or 1000))
+except ValueError:
+    SEUIL_BAISSE_M3 = 1000.0
+
+# Filtre d'affichage supplémentaire, en pourcentage (0 = aucun).
 BAISSE_MIN_PCT_DEFAUT = 0.0
 
 # Paliers de gravité — couleur et tri uniquement.

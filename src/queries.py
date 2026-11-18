@@ -102,6 +102,49 @@ _CS_DEDUP = f"""
     ) = 1
 """
 
+# Volume NET des factures (17/11/2026, validé sur le secteur 4 du centre 91,
+# période 11, identique à l'EGF). Une facture relevée couvre toute la
+# période depuis la relevée précédente : les estimées émises entre les deux
+# sont remboursées (ligne PRD_ID 26 de S_FACTURE_DET, en montant seulement).
+# Volume remboursé = somme des estimées (type 1) de l'abonné émises depuis
+# sa relevée précédente ; volume net = FAT_QTE_CONS - volume remboursé.
+# Ex. abonné 15043325 : estimée 25 le 12/10, relevée 51 le 11/11 -> net 26.
+# Les factures restent dans leur propre secteur (S_FACTURE_M.SECT_ID),
+# abonnés groupés compris. Utilisé partout où l'on additionne des volumes.
+# Limite : une estimée antérieure à l'historique chargé (HISTORIQUE_MOIS)
+# n'est pas retrouvée, son remboursement n'est alors pas déduit.
+_FM = """(
+    SELECT f.* REPLACE (
+               CASE WHEN f.TYPE_FACT = 0
+                    THEN COALESCE(f.FAT_QTE_CONS, 0) - COALESCE(rb.vol_remb, 0)
+                    ELSE f.FAT_QTE_CONS
+               END AS FAT_QTE_CONS),
+           COALESCE(rb.vol_remb, 0) AS vol_remb
+    FROM raw_facture_m f
+    LEFT JOIN (
+        WITH v AS (
+            SELECT FACT_ID, ABN_ID, FACT_DATE, TYPE_FACT,
+                   COALESCE(FAT_QTE_CONS, 0) AS vol,
+                   MAX(CASE WHEN TYPE_FACT = 0 THEN FACT_DATE END) OVER (
+                       PARTITION BY ABN_ID ORDER BY FACT_DATE, FACT_ID
+                       ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                   ) AS releve_prec
+            FROM raw_facture_m
+            WHERE COALESCE(FLAGANNULLE, 0) = 0
+              AND TYPE_FACT IN (0, 1, 2)
+        )
+        SELECT r.FACT_ID, SUM(e.vol) AS vol_remb
+        FROM v r
+        JOIN v e
+          ON e.ABN_ID = r.ABN_ID
+         AND e.TYPE_FACT = 1
+         AND e.FACT_DATE < r.FACT_DATE
+         AND (r.releve_prec IS NULL OR e.FACT_DATE > r.releve_prec)
+        WHERE r.TYPE_FACT = 0
+        GROUP BY r.FACT_ID
+    ) rb ON rb.FACT_ID = f.FACT_ID
+)"""
+
 # Nombre de factures émises par secteur et par cycle : sert à savoir si le
 # secteur est réellement passé en facturation (EGF).
 _FACT_PAR_SECTEUR = f"""
@@ -111,8 +154,19 @@ _FACT_PAR_SECTEUR = f"""
                                        AS nb_factures_releve,
            SUM(CASE WHEN TYPE_FACT IN ({_TYPES_RELEVEE})
                     THEN COALESCE(FAT_QTE_CONS, 0) ELSE 0 END)
-                                       AS vol_releve
-    FROM raw_facture_m
+                                       AS vol_releve,
+           -- Même volume sans les abonnés groupés (S_ABONNEMENT.GRP_ID
+           -- renseigné) : l'EGF ne les contient pas, sert à rapprocher.
+           SUM(CASE WHEN TYPE_FACT IN ({_TYPES_RELEVEE}) AND grp_id_abn IS NULL
+                    THEN COALESCE(FAT_QTE_CONS, 0) ELSE 0 END)
+                                       AS vol_releve_hors_grp
+    FROM (
+        SELECT x.*, ab.grp_id_abn
+        FROM {_FM} x
+        LEFT JOIN (SELECT ABN_ID AS g_abn, MAX(GRP_ID) AS grp_id_abn
+                   FROM raw_abonnement GROUP BY ABN_ID) ab
+          ON ab.g_abn = x.ABN_ID
+    ) AS fm_r
     WHERE COALESCE(FLAGANNULLE, 0) = 0
       AND TYPE_FACT IN ({_TYPES_CONSO})
       AND STR_ID NOT IN ({_EXCLU})
@@ -330,36 +384,16 @@ def _sql_secteurs() -> str:
         SELECT f.STR_ID, f.SECT_ID, f.ABN_ID,
                f.FACT_ANNEE AS ANNEE, f.FACT_PERIODE AS MOIS,
                SUM(COALESCE(f.FAT_QTE_CONS, 0)) AS v
-        FROM raw_facture_m f, cyc
+        FROM {_FM} f, cyc
         WHERE COALESCE(f.FLAGANNULLE, 0) = 0
           AND f.TYPE_FACT IN ({_TYPES_RELEVEE})
           AND ((f.FACT_ANNEE = an AND f.FACT_PERIODE = mn)
             OR (f.FACT_ANNEE = ap AND f.FACT_PERIODE = mp))
         GROUP BY f.STR_ID, f.SECT_ID, f.ABN_ID, f.FACT_ANNEE, f.FACT_PERIODE
     ),
-    -- Référence de chaque abonné : MÉDIANE de ses 3 dernières factures
-    -- relevées jusqu'au cycle de référence inclus (12 mois d'historique).
-    -- Un pic isolé au cycle de référence ne fabrique plus de fausse baisse
-    -- (cas réel : abonné 15196540, 225 m³ en 09/2026 pour ~29 d'habitude).
-    hist AS (
-        SELECT f.STR_ID, f.SECT_ID, f.ABN_ID,
-               f.FACT_ANNEE * 12 + f.FACT_PERIODE AS mi,
-               SUM(COALESCE(f.FAT_QTE_CONS, 0)) AS v
-        FROM raw_facture_m f, cyc
-        WHERE COALESCE(f.FLAGANNULLE, 0) = 0
-          AND f.TYPE_FACT IN ({_TYPES_RELEVEE})
-          AND f.FACT_ANNEE * 12 + f.FACT_PERIODE
-              BETWEEN cyc.ap * 12 + cyc.mp - 12 AND cyc.ap * 12 + cyc.mp
-        GROUP BY f.STR_ID, f.SECT_ID, f.ABN_ID, f.FACT_ANNEE, f.FACT_PERIODE
-    ),
-    ref AS (
-        SELECT STR_ID, SECT_ID, ABN_ID, MEDIAN(v) AS v_ref
-        FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY STR_ID, SECT_ID, ABN_ID
-                                           ORDER BY mi DESC) AS k
-              FROM hist)
-        WHERE k <= 3
-        GROUP BY STR_ID, SECT_ID, ABN_ID
-    ),
+    -- Comparaison DIRECTE N vs N-2 (N-1 pour les gros consommateurs) :
+    -- plus de référence lissée (médiane), le volume du cycle de
+    -- comparaison est pris tel quel.
     -- Abonnés perdus : facturés en relevé au cycle de référence, sans
     -- facture relevée au cycle N (estimés, non facturés, sortis). Ils ne
     -- sont pas dans la comparaison, mais leur nombre et leur volume sont
@@ -367,18 +401,30 @@ def _sql_secteurs() -> str:
     perdus AS (
         SELECT rp.STR_ID, rp.SECT_ID,
                COUNT(*)                      AS nb_perdus,
-               SUM(COALESCE(rf.v_ref, rp.v)) AS vol_perdus
+               SUM(rp.v)                     AS vol_perdus
         FROM rel rp
         JOIN cyc ON rp.ANNEE = cyc.ap AND rp.MOIS = cyc.mp
         LEFT JOIN rel rn
           ON rn.ABN_ID = rp.ABN_ID
          AND rn.STR_ID = rp.STR_ID AND rn.SECT_ID = rp.SECT_ID
          AND rn.ANNEE = cyc.an AND rn.MOIS = cyc.mn
-        LEFT JOIN ref rf
-          ON rf.ABN_ID = rp.ABN_ID
-         AND rf.STR_ID = rp.STR_ID AND rf.SECT_ID = rp.SECT_ID
         WHERE rn.ABN_ID IS NULL
         GROUP BY rp.STR_ID, rp.SECT_ID
+    ),
+    -- Abonnés ajoutés : facturés en relevé au cycle N, sans facture
+    -- relevée au cycle de comparaison (nouveaux, ou de retour).
+    ajoutes AS (
+        SELECT rn.STR_ID, rn.SECT_ID,
+               COUNT(*)                      AS nb_ajoutes,
+               SUM(rn.v)                     AS vol_ajoutes
+        FROM rel rn
+        JOIN cyc ON rn.ANNEE = cyc.an AND rn.MOIS = cyc.mn
+        LEFT JOIN rel rp
+          ON rp.ABN_ID = rn.ABN_ID
+         AND rp.STR_ID = rn.STR_ID AND rp.SECT_ID = rn.SECT_ID
+         AND rp.ANNEE = cyc.ap AND rp.MOIS = cyc.mp
+        WHERE rp.ABN_ID IS NULL
+        GROUP BY rn.STR_ID, rn.SECT_ID
     ),
     -- Comparaison à abonnés constants : seuls comptent les abonnés
     -- facturés en relevé sur les DEUX cycles. Un abonné facturé en
@@ -387,13 +433,8 @@ def _sql_secteurs() -> str:
     paire AS (
         SELECT rn.STR_ID, rn.SECT_ID,
                SUM(rn.v)                     AS vol_n,
-               -- Référence = la plus petite valeur entre la médiane des
-               -- 3 dernières factures et le cycle précédent : une alerte ne
-               -- part que si le volume baisse à la fois par rapport au
-               -- dernier cycle ET au niveau habituel (cas réel : Borne
-               -- Fontaine n° 8 de SEBKHA, 12 858 -> 12 900 m³ signalé en
-               -- baisse contre une médiane de 15 346).
-               SUM(LEAST(COALESCE(rf.v_ref, rp.v), rp.v)) AS vol_p,
+               -- Volume du cycle de comparaison, brut (N-2 ou N-1).
+               SUM(rp.v)                     AS vol_p,
                SUM(rp.v)                     AS vol_p_cycle,
                COUNT(*)                      AS nb_abonnes_compares
         FROM rel rn
@@ -402,9 +443,6 @@ def _sql_secteurs() -> str:
           ON rp.ABN_ID = rn.ABN_ID
          AND rp.STR_ID = rn.STR_ID AND rp.SECT_ID = rn.SECT_ID
          AND rp.ANNEE = cyc.ap AND rp.MOIS = cyc.mp
-        LEFT JOIN ref rf
-          ON rf.ABN_ID = rn.ABN_ID
-         AND rf.STR_ID = rn.STR_ID AND rf.SECT_ID = rn.SECT_ID
         GROUP BY rn.STR_ID, rn.SECT_ID
     ),
     base AS (
@@ -425,12 +463,22 @@ def _sql_secteurs() -> str:
             COALESCE(pa.vol_p_cycle, 0)    AS vol_p_cycle,
             COALESCE(pe.nb_perdus, 0)      AS nb_perdus,
             COALESCE(pe.vol_perdus, 0)     AS vol_perdus,
+            COALESCE(aj.nb_ajoutes, 0)     AS nb_ajoutes,
+            COALESCE(aj.vol_ajoutes, 0)    AS vol_ajoutes,
             COALESCE(n.VOLUMESTIM, 0)      AS vol_estime_n,
             COALESCE(p.VOLUMESTIM, 0)      AS vol_estime_p,
             COALESCE(fn.nb_factures, 0)    AS nb_factures_n,
             COALESCE(fp.nb_factures, 0)    AS nb_factures_p,
-            COALESCE(n.VOLUMEFACT, 0)      AS vol_total_n,
-            COALESCE(p.VOLUMEFACT, 0)      AS vol_total_p
+            -- Volume total = factures relevée/estimée/forfait non
+            -- annulées de S_FACTURE_M (groupés compris), en volume NET
+            -- (estimées remboursées déduites), secteur de la facture.
+            -- VOLUMEFACT de la clôture n'est plus utilisé : c'est une photo
+            -- prise à la clôture (factures émises après absentes, 0 pour
+            -- un secteur facturé sans clôture).
+            COALESCE(fn.vol_releve, 0)     AS vol_total_n,
+            COALESCE(fp.vol_releve, 0)     AS vol_total_p,
+            COALESCE(fn.vol_releve_hors_grp, 0) AS vol_total_hors_grp_n,
+            COALESCE(fp.vol_releve_hors_grp, 0) AS vol_total_hors_grp_p
         FROM n
         FULL OUTER JOIN p
           ON p.STR_ID = n.STR_ID AND p.SECT_ID = n.SECT_ID
@@ -446,6 +494,9 @@ def _sql_secteurs() -> str:
         LEFT JOIN perdus pe
           ON pe.STR_ID = COALESCE(n.STR_ID, p.STR_ID, fn.STR_ID)
          AND pe.SECT_ID = COALESCE(n.SECT_ID, p.SECT_ID, fn.SECT_ID)
+        LEFT JOIN ajoutes aj
+          ON aj.STR_ID = COALESCE(n.STR_ID, p.STR_ID, fn.STR_ID)
+         AND aj.SECT_ID = COALESCE(n.SECT_ID, p.SECT_ID, fn.SECT_ID)
     )
     SELECT
         b.centre_code,
@@ -465,8 +516,12 @@ def _sql_secteurs() -> str:
         b.nb_abonnes_compares,
         b.nb_perdus,
         ROUND(b.vol_perdus, 1)                        AS vol_perdus,
+        b.nb_ajoutes,
+        ROUND(b.vol_ajoutes, 1)                       AS vol_ajoutes,
         b.vol_total_n,
         b.vol_total_p,
+        ROUND(b.vol_total_hors_grp_n, 1)              AS vol_total_hors_grp_n,
+        ROUND(b.vol_total_hors_grp_p, 1)              AS vol_total_hors_grp_p,
         ROUND(b.vol_n, 1)                             AS vol_n,
         ROUND(b.vol_p, 1)                             AS vol_p,
         ROUND(b.vol_n - b.vol_p, 1)                   AS ecart,
@@ -477,7 +532,16 @@ def _sql_secteurs() -> str:
         CASE WHEN b.vol_total_p > 0
              THEN ROUND(100.0 * (b.vol_total_n - b.vol_total_p) / b.vol_total_p, 1)
         END                                           AS ecart_total_pct,
-        {_GRAVITE.replace('vol_n', 'b.vol_n').replace('vol_p', 'b.vol_p')}
+        -- Cause principale d'une baisse du volume total : la perte la plus
+        -- grosse entre celle des abonnés constants et celle des abonnés
+        -- perdus (facturés au cycle de comparaison, plus en N).
+        CASE WHEN (b.vol_n - b.vol_p) < 0
+              AND (b.vol_p - b.vol_n) >= COALESCE(b.vol_perdus, 0)
+             THEN 'Abonnés constants'
+             ELSE 'Abonnés perdus'
+        END                                           AS cause,
+        -- Gravité calculée sur le volume facturé TOTAL, comme l'alerte.
+        {_GRAVITE.replace('vol_n', 'b.vol_total_n').replace('vol_p', 'b.vol_total_p')}
                                                       AS gravite,
         -- Une saisie inachevée fait baisser le volume mécaniquement :
         -- la comparaison n'est définitive qu'une fois le secteur clôturé.
@@ -503,6 +567,34 @@ def _sql_secteurs() -> str:
     LEFT JOIN ref_centre  ce  ON ce.CENTRE_ID = b.centre_code
     LEFT JOIN ref_secteur sec ON sec.SECT_ID  = b.secteur_code
     """
+
+
+# ============================================================
+# Règle d'alerte — une seule définition pour tout le monde
+# ============================================================
+# Journal des alertes, bandeau, cartes, onglet Baisses, Excel : tous
+# utilisent ces trois prédicats, pour que les chiffres concordent.
+
+def cond_baisse_constants() -> str:
+    """Abonnés constants en baisse d'au moins SEUIL_BAISSE_M3."""
+    s = float(config.SEUIL_BAISSE_M3)
+    return f"(COALESCE(ecart, 0) < 0 AND COALESCE(ecart, 0) <= -{s})"
+
+
+def cond_baisse_total() -> str:
+    """Volume facturé total du secteur en baisse d'au moins SEUIL_BAISSE_M3."""
+    s = float(config.SEUIL_BAISSE_M3)
+    return (f"(COALESCE(ecart_total, 0) < 0 "
+            f"AND COALESCE(ecart_total, 0) <= -{s})")
+
+
+def cond_alerte() -> str:
+    """Secteur en alerte : volume facturé total en baisse d'au moins le seuil."""
+    return cond_baisse_total()
+
+
+CAUSE_CONSTANTS = "Abonnés constants"
+CAUSE_PERDUS = "Abonnés perdus"
 
 
 def secteurs(
@@ -535,10 +627,9 @@ def secteurs(
     conditions.append("etat = 'FACTURE'")
 
     if seulement_baisses:
-        # Toute baisse est retenue : soit les abonnés constants sont en
-        # baisse (ecart < 0), soit le volume total du secteur a baissé
-        # (ecart_total < 0).
-        conditions.append("(ecart < 0 OR ecart_total < 0)")
+        # Secteur retenu si son volume facturé total baisse d'au moins
+        # config.SEUIL_BAISSE_M3 m³ (cause indiquée dans la colonne `cause`).
+        conditions.append(cond_alerte())
         if baisse_min_pct and baisse_min_pct > 0:
             conditions.append(
                 "(ecart_pct IS NULL OR ecart_pct <= ?)"
@@ -550,7 +641,7 @@ def secteurs(
     rows = db.lignes(f"""
         SELECT * FROM ({_sql_secteurs()}) t
         {where}
-        ORDER BY ecart ASC NULLS LAST, centre_libelle, secteur_num
+        ORDER BY ecart_total ASC NULLS LAST, centre_libelle, secteur_num
     """, params)
 
     comp = _lib_comparaison(annee, mois, pa, pm)
@@ -578,7 +669,7 @@ def centres(annee: int, mois: int,
             centre_libelle,
             zone_id,
             COUNT(*)                                   AS nb_secteurs,
-            COUNT(*) FILTER (WHERE ecart < 0)          AS nb_en_baisse,
+            COUNT(*) FILTER (WHERE {cond_alerte()})    AS nb_en_baisse,
             COUNT(*) FILTER (WHERE gravite = 'DISPARU') AS nb_disparus,
             COUNT(*) FILTER (WHERE fiabilite = 'provisoire') AS nb_provisoires,
             CAST(SUM(vol_n) AS BIGINT)                 AS vol_n,
@@ -587,8 +678,12 @@ def centres(annee: int, mois: int,
             CASE WHEN SUM(vol_p) > 0
                  THEN ROUND(100.0 * (SUM(vol_n) - SUM(vol_p)) / SUM(vol_p), 1)
             END                                        AS ecart_pct,
-            CAST(SUM(CASE WHEN ecart < 0 THEN -ecart ELSE 0 END) AS BIGINT)
+            CAST(COALESCE(SUM(-ecart) FILTER (
+                     WHERE {cond_alerte()} AND ecart < 0), 0) AS BIGINT)
                                                        AS volume_perdu,
+            CAST(COALESCE(SUM(-ecart_total) FILTER (
+                     WHERE {cond_alerte()} AND ecart_total < 0), 0) AS BIGINT)
+                                                       AS baisse_totale,
             CAST(SUM(nb_perdus) AS BIGINT)             AS nb_perdus,
             CAST(SUM(vol_perdus) AS BIGINT)            AS vol_perdus
         FROM t
@@ -640,17 +735,27 @@ def synthese(annee: int, mois: int,
                  THEN ROUND(100.0 * (SUM(vol_n) - SUM(vol_p)) / SUM(vol_p), 1)
             END                                          AS ecart_pct,
             COUNT(*)                                     AS nb_secteurs,
-            COUNT(*) FILTER (WHERE ecart < 0)            AS nb_en_baisse,
+            COUNT(*) FILTER (WHERE {cond_alerte()})      AS nb_en_baisse,
+            COUNT(*) FILTER (WHERE {cond_alerte()}
+                               AND cause = '{CAUSE_CONSTANTS}')
+                                                         AS nb_cause_constants,
+            COUNT(*) FILTER (WHERE {cond_alerte()}
+                               AND cause = '{CAUSE_PERDUS}')
+                                                         AS nb_cause_perdus,
             COUNT(*) FILTER (WHERE gravite = 'FORTE')    AS nb_forte,
             COUNT(*) FILTER (WHERE gravite = 'MOYENNE')  AS nb_moyenne,
             COUNT(*) FILTER (WHERE gravite = 'LEGERE')   AS nb_legere,
             COUNT(*) FILTER (WHERE gravite = 'DISPARU')  AS nb_disparus,
-            COUNT(*) FILTER (WHERE fiabilite = 'provisoire' AND ecart < 0)
+            COUNT(*) FILTER (WHERE fiabilite = 'provisoire' AND {cond_alerte()})
                                                          AS nb_provisoires,
-            COUNT(DISTINCT centre_code) FILTER (WHERE ecart < 0)
+            COUNT(DISTINCT centre_code) FILTER (WHERE {cond_alerte()})
                                                          AS nb_centres_touches,
-            CAST(SUM(CASE WHEN ecart < 0 THEN -ecart ELSE 0 END) AS BIGINT)
+            CAST(COALESCE(SUM(-ecart) FILTER (
+                     WHERE {cond_alerte()} AND ecart < 0), 0) AS BIGINT)
                                                          AS volume_perdu,
+            CAST(COALESCE(SUM(-ecart_total) FILTER (
+                     WHERE {cond_alerte()} AND ecart_total < 0), 0) AS BIGINT)
+                                                         AS baisse_totale,
             CAST(SUM(nb_perdus) AS BIGINT)               AS nb_perdus,
             CAST(SUM(vol_perdus) AS BIGINT)              AS vol_perdus,
             CAST(SUM(vol_estime_n) AS BIGINT)            AS vol_estime_n,
@@ -669,6 +774,7 @@ def synthese(annee: int, mois: int,
         "cycle_precedent_key": cycles.cycle_key(pa, pm),
         "parite": cycles.parite(mois),
         "population": population,
+        "seuil_m3": float(config.SEUIL_BAISSE_M3),
         "nb_gros_consommateurs": len(secteurs_mensuels(annee, mois)),
     }
 
@@ -693,7 +799,7 @@ def references(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
                CASE WHEN TYPE_FACT IN ({_TYPES_RELEVEE})
                     THEN COALESCE(FAT_QTE_CONS, 0) ELSE 0 END AS vol,
                FACT_MNT
-        FROM raw_facture_m
+        FROM {_FM} AS fm_r
         WHERE STR_ID = ? AND SECT_ID = ?
           AND FACT_ANNEE = ? AND FACT_PERIODE = ?
           AND COALESCE(FLAGANNULLE, 0) = 0
@@ -706,7 +812,7 @@ def references(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
                CASE WHEN TYPE_FACT IN ({_TYPES_RELEVEE})
                     THEN COALESCE(FAT_QTE_CONS, 0) ELSE 0 END AS vol,
                TYPE_FACT
-        FROM raw_facture_m
+        FROM {_FM} AS fm_r
         WHERE STR_ID = ? AND SECT_ID = ?
           AND FACT_ANNEE = ? AND FACT_PERIODE = ?
           AND COALESCE(FLAGANNULLE, 0) = 0
@@ -1127,7 +1233,7 @@ def abonnes(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
                CASE WHEN TYPE_FACT IN ({_TYPES_RELEVEE})
                     THEN COALESCE(FAT_QTE_CONS, 0) ELSE 0 END AS vol,
                FACT_MNT
-        FROM raw_facture_m
+        FROM {_FM} AS fm_r
         WHERE STR_ID = ? AND SECT_ID = ?
           AND FACT_ANNEE = ? AND FACT_PERIODE = ?
           AND COALESCE(FLAGANNULLE, 0) = 0
@@ -1139,7 +1245,7 @@ def abonnes(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
         SELECT ABN_ID,
                CASE WHEN TYPE_FACT IN ({_TYPES_RELEVEE})
                     THEN COALESCE(FAT_QTE_CONS, 0) ELSE 0 END AS vol
-        FROM raw_facture_m
+        FROM {_FM} AS fm_r
         WHERE STR_ID = ? AND SECT_ID = ?
           AND FACT_ANNEE = ? AND FACT_PERIODE = ?
           AND COALESCE(FLAGANNULLE, 0) = 0
@@ -1151,7 +1257,7 @@ def abonnes(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
     -- relevées du cycle, et référence = médiane des 3 dernières.
     sn AS (
         SELECT ABN_ID, SUM(COALESCE(FAT_QTE_CONS, 0)) AS v
-        FROM raw_facture_m
+        FROM {_FM} AS fm_r
         WHERE STR_ID = ? AND SECT_ID = ?
           AND FACT_ANNEE = ? AND FACT_PERIODE = ?
           AND COALESCE(FLAGANNULLE, 0) = 0
@@ -1161,7 +1267,7 @@ def abonnes(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
     hist AS (
         SELECT ABN_ID, FACT_ANNEE * 12 + FACT_PERIODE AS mi,
                SUM(COALESCE(FAT_QTE_CONS, 0)) AS v
-        FROM raw_facture_m
+        FROM {_FM} AS fm_r
         WHERE STR_ID = ? AND SECT_ID = ?
           AND COALESCE(FLAGANNULLE, 0) = 0
           AND TYPE_FACT IN ({_TYPES_RELEVEE})
@@ -1169,14 +1275,6 @@ def abonnes(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
         GROUP BY ABN_ID, FACT_ANNEE, FACT_PERIODE
     ),
     hp AS (SELECT ABN_ID, v FROM hist WHERE mi = ?),
-    ref AS (
-        SELECT ABN_ID, MEDIAN(v) AS v_ref
-        FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY ABN_ID
-                                           ORDER BY mi DESC) AS k
-              FROM hist)
-        WHERE k <= 3
-        GROUP BY ABN_ID
-    ),
     cpt AS (
         SELECT ABN_ID, CPT_SERIE, CPI_REF
         FROM raw_compteur
@@ -1198,7 +1296,7 @@ def abonnes(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
             (p.ABN_ID IS NOT NULL)                       AS dans_parc,
             COALESCE(sn.v, 0)                            AS vol_n,
             CASE WHEN hp.ABN_ID IS NOT NULL
-                 THEN LEAST(COALESCE(ref.v_ref, hp.v), hp.v)
+                 THEN hp.v
                  ELSE 0 END                              AS vol_p,
             COALESCE(hp.v, 0)                            AS vol_p_cycle,
             fn.FACT_NUM, fn.FACT_DATE, fn.TYPE_FACT, fn.FACT_MNT,
@@ -1218,7 +1316,6 @@ def abonnes(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
         LEFT JOIN fp      ON fp.ABN_ID = i.ABN_ID
         LEFT JOIN sn      ON sn.ABN_ID = i.ABN_ID
         LEFT JOIN hp      ON hp.ABN_ID = i.ABN_ID
-        LEFT JOIN ref     ON ref.ABN_ID = i.ABN_ID
     )
     SELECT
         b.abn_id                                      AS reference,

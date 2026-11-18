@@ -1051,6 +1051,12 @@ const LIB_SAISIE = {
   NON_RELEVE:"Non relevé", RELEVE:"Relevé", FACTURE:"Facturé",
   HORS_PARC:"Hors parc"
 };
+function bCause(c){
+  if(!c) return "";
+  const perdus = c === "Abonnés perdus";
+  return '<span class="b '+(perdus ? "b-DISPARU" : "b-FORTE")+'" title="Cause principale de la baisse du volume total">'
+    + esc(c)+"</span>";
+}
 function bGravite(g){
   return '<span class="b b-'+esc(g)+'">'+esc(LIB_GRAVITE[g]||g)+'</span>';
 }
@@ -1093,12 +1099,12 @@ const S = {
   centre: "", secteur: "", q: "", zone: "",
   minPct: 0, toutes: false, nonLues: false, etatAv: "",
   statutAb: "", abBaisse: false,
-  triS: {col:"ecart", dir:1}, triC: {col:"ecart", dir:1},
+  triS: {col:"ecart_total", dir:1}, triC: {col:"ecart", dir:1},
   triA: {col:"ecart", dir:1}, triV: {col:"pct_declare", dir:1},
   triB: {col:"ecart", dir:1},
   gSynthese: null, gCentres: [], gSecteurs: [], gNb: 0,
   gMin: 0, gToutes: false,
-  triGC: {col:"ecart", dir:1}, triGS: {col:"ecart", dir:1},
+  triGC: {col:"ecart", dir:1}, triGS: {col:"ecart_total", dir:1},
   nbNonLues: 0
 };
 
@@ -1255,10 +1261,15 @@ async function majBandeau(flash){
     document.getElementById("band-t").textContent =
       total + (total > 1 ? " secteurs en baisse de facturation"
                          : " secteur en baisse de facturation")
+      + (c.seuil_m3 ? " (≥ " + n0(c.seuil_m3) + " m³)" : "")
       + " — " + MOIS_LIB[cm % 100 - 1] + " " + Math.floor(cm / 100)
+      + ", toutes zones, ordinaires + gros consommateurs"
       + " · " + (nonLues ? n0(nonLues) + " non consultée(s)" : "toutes consultées");
     document.getElementById("band-s").textContent =
-      n0(c.volume_perdu) + " m³ perdus · " + n0(c.nb_centres)
+      n0(c.baisse_totale) + " m³ de baisse du volume total · "
+      + n0(c.nb_cause_constants) + " secteur(s) par baisse des abonnés constants, "
+      + n0(c.nb_cause_perdus) + " par abonnés perdus · "
+      + n0(c.nb_centres)
       + " centre(s) · " + n0(c.nb_forte) + " baisse(s) forte(s)"
       + (c.derniere ? " · dernière détection " + hm(c.derniere) : "");
     el.classList.add("on");
@@ -1322,6 +1333,7 @@ const COLS_A = [
   {k:"vol_n", lab:"Vol. comparé N", num:true},
   {k:"ecart", lab:"Écart comparé m³", num:true},
   {k:"ecart_pct", lab:"Écart comparé %", num:true},
+  {k:"cause", lab:"Cause"},
   {k:"gravite", lab:"Gravité"},
   {k:"detected_at", lab:"Détectée"},
   {k:"acknowledged", lab:"Statut"}
@@ -1345,11 +1357,11 @@ async function ouvrirAlertes(){
 
 function dessinerAlertes(){
   const rows = trier(S.alertes, S.triA);
-  const perdu = rows.reduce((a,r)=> a + ((r.ecart||0)<0 ? -r.ecart : 0), 0);
+  const perdu = rows.reduce((a,r)=> a + ((r.ecart_total||0)<0 ? -r.ecart_total : 0), 0);
   const nonlu = rows.filter(r=>!r.acknowledged).length;
   document.getElementById("sub-alertes").textContent =
     rows.length + " alerte(s) — " + nonlu + " non consultée(s) — "
-    + n0(Math.round(perdu)) + " m³ perdus";
+    + n0(Math.round(perdu)) + " m³ de baisse du volume total";
 
   if(!rows.length){
     document.getElementById("w-alertes").innerHTML =
@@ -1375,6 +1387,7 @@ function dessinerAlertes(){
     + '<td class="num tnum">'+n0(r.vol_n)+"</td>"
     + '<td class="num tnum">'+sgn(r.ecart, n0)+"</td>"
     + '<td class="num tnum">'+sgn(r.ecart_pct, v=>NF1.format(v)+" %")+"</td>"
+    + "<td>"+bCause(r.cause)+"</td>"
     + "<td>"+bGravite(r.gravite)+"</td>"
     + '<td class="tnum mut">'+hm(r.detected_at)+"</td>"
     + "<td>" + (r.acknowledged
@@ -1916,12 +1929,17 @@ function dessinerKpis(){
      val:((s.ecart>0?"+":"")+n0(s.ecart))+" m³",
      sub:(s.ecart_pct===null||s.ecart_pct===undefined)
            ? "—" : ((s.ecart_pct>0?"+":"")+pc(s.ecart_pct))},
-    {cls:(s.nb_en_baisse>0?"danger":"good"), lab:"Secteurs en baisse",
+    {cls:(s.nb_en_baisse>0?"danger":"good"),
+     lab:"Secteurs en baisse"+(s.seuil_m3 ? " (≥ "+n0(s.seuil_m3)+" m³)" : ""),
      val:n0(s.nb_en_baisse)+" / "+n0(s.nb_secteurs),
-     sub:n0(s.nb_centres_touches)+" centre(s) concerné(s)"},
-    {cls:(s.volume_perdu>0?"danger":""), lab:"Volume perdu",
-     val:n0(s.volume_perdu)+" m³",
-     sub:"abonnés perdus : "+n0(s.nb_perdus)+" ("+n0(s.vol_perdus)+" m³)"}
+     sub:n0(s.nb_cause_constants)+" secteur(s) par baisse des abonnés constants, "
+         +n0(s.nb_cause_perdus)+" par abonnés perdus · "
+         +n0(s.nb_centres_touches)+" centre(s)"},
+    {cls:(s.baisse_totale>0?"danger":""),
+     lab:"Baisse du volume total",
+     val:n0(s.baisse_totale)+" m³",
+     sub:"dont abonnés constants : "+n0(s.volume_perdu)+" m³ · abonnés perdus (tous secteurs) : "
+         +n0(s.nb_perdus)+" ("+n0(s.vol_perdus)+" m³)"}
   ];
   document.getElementById("kpis").innerHTML = cards.map(kpiCarte).join("");
 
@@ -1980,11 +1998,14 @@ const COLS_S = [
   {k:"centre_libelle", lab:"Centre"},
   {k:"secteur_num", lab:"N°"},
   {k:"secteur_libelle", lab:"Secteur"},
-  {k:"vol_p_cycle", lab:"Volume N-2", num:true},
-  {k:"vol_n", lab:"Volume N", num:true},
-  {k:"vol_p", lab:"Référence", num:true},
-  {k:"ecart", lab:"Écart m³", num:true},
-  {k:"ecart_pct", lab:"Écart %", num:true},
+  {k:"vol_total_p", lab:"Volume total N-2", num:true},
+  {k:"vol_total_n", lab:"Volume total N", num:true},
+  {k:"vol_total_hors_grp_n", lab:"Vol. N sans groupés", num:true},
+  {k:"ecart_total", lab:"Écart total m³", num:true},
+  {k:"ecart_total_pct", lab:"Écart total %", num:true},
+  {k:"nb_perdus", lab:"Abonnés perdus", num:true},
+  {k:"nb_ajoutes", lab:"Abonnés ajoutés", num:true},
+  {k:"cause", lab:"Cause"},
   {k:"gravite", lab:"Gravité"}
 ];
 
@@ -2002,10 +2023,10 @@ function dessinerSecteurs(){
     filtreTexte(base, ["centre_libelle","secteur_libelle","secteur_num"]),
     S.triS);
   const s = S.synthese || {};
-  const perdu = rows.reduce((a,r)=> a + ((r.ecart||0)<0 ? -r.ecart : 0), 0);
+  const perdu = rows.reduce((a,r)=> a + ((r.ecart_total||0)<0 ? -r.ecart_total : 0), 0);
   document.getElementById("sub-secteurs").textContent =
     rows.length + " secteur(s) affiché(s) — " + n0(Math.round(perdu))
-    + " m³ perdus — cycle " + (s.cycle||"") + " vs " + (s.cycle_precedent||"");
+    + " m³ de baisse du volume total — cycle " + (s.cycle||"") + " vs " + (s.cycle_precedent||"");
 
   const nbProv = rows.filter(r=>r.fiabilite==="provisoire").length;
   document.getElementById("note-prov").textContent = nbProv
@@ -2028,11 +2049,14 @@ function dessinerSecteurs(){
       + (S.centre ? "" : "<td>"+esc(r.centre_libelle)+"</td>")
       + '<td class="tnum">'+esc(r.secteur_num)+"</td>"
       + "<td><b>"+esc(r.secteur_libelle)+"</b></td>"
-      + '<td class="num tnum">'+n0(r.vol_p_cycle)+"</td>"
-      + '<td class="num tnum"><b>'+n0(r.vol_n)+"</b></td>"
-      + '<td class="num tnum mut">'+n0(r.vol_p)+"</td>"
-      + '<td class="num tnum">'+sgn(r.ecart, n0)+"</td>"
-      + '<td class="num tnum">'+sgn(r.ecart_pct, v=>NF1.format(v)+" %")+"</td>"
+      + '<td class="num tnum">'+n0(r.vol_total_p)+"</td>"
+      + '<td class="num tnum"><b>'+n0(r.vol_total_n)+"</b></td>"
+      + '<td class="num tnum mut" title="Sans les abonnés groupés, pour comparer avec l\'EGF">'+n0(r.vol_total_hors_grp_n)+"</td>"
+      + '<td class="num tnum"><b>'+sgn(r.ecart_total, n0)+"</b></td>"
+      + '<td class="num tnum">'+sgn(r.ecart_total_pct, v=>NF1.format(v)+" %")+"</td>"
+      + '<td class="num tnum">'+n0(r.nb_perdus)+"</td>"
+      + '<td class="num tnum">'+n0(r.nb_ajoutes)+"</td>"
+      + "<td>"+bCause(r.cause)+"</td>"
       + "<td>"+bGravite(r.gravite)+"</td></tr>";
   }).join("");
 
@@ -2102,13 +2126,17 @@ function dessinerGrosKpis(){
      val:((s.ecart>0?"+":"")+n0(s.ecart))+" m³",
      sub:(s.ecart_pct===null||s.ecart_pct===undefined)
            ? "—" : ((s.ecart_pct>0?"+":"")+pc(s.ecart_pct))},
-    {cls:(s.nb_en_baisse>0?"danger":"good"), lab:"Gros consommateurs en baisse",
+    {cls:(s.nb_en_baisse>0?"danger":"good"),
+     lab:"Gros consommateurs en baisse"+(s.seuil_m3 ? " (≥ "+n0(s.seuil_m3)+" m³)" : ""),
      val:n0(s.nb_en_baisse)+" / "+n0(s.nb_secteurs),
-     sub:n0(s.nb_gros_consommateurs)+" secteur(s) mensuel(s) repéré(s), "
-         + n0(s.nb_secteurs)+" facturé(s) ce mois"},
-    {cls:(s.volume_perdu>0?"danger":""), lab:"Volume perdu",
-     val:n0(s.volume_perdu)+" m³",
-     sub:n0(s.nb_centres_touches)+" centre(s) concerné(s)"}
+     sub:n0(s.nb_cause_constants)+" secteur(s) par baisse des abonnés constants, "
+         +n0(s.nb_cause_perdus)+" par abonnés perdus · "
+         +n0(s.nb_gros_consommateurs)+" secteur(s) mensuel(s) repéré(s)"},
+    {cls:(s.baisse_totale>0?"danger":""),
+     lab:"Baisse du volume total",
+     val:n0(s.baisse_totale)+" m³",
+     sub:"dont abonnés constants : "+n0(s.volume_perdu)+" m³ · "
+         +n0(s.nb_centres_touches)+" centre(s)"}
   ];
   document.getElementById("kpis-g").innerHTML = cards.map(kpiCarte).join("");
 }
@@ -2185,11 +2213,14 @@ function dessinerGrosSecteurs(){
       + (S.centre ? "" : "<td>"+esc(r.centre_libelle)+"</td>")
       + '<td class="tnum">'+esc(r.secteur_num)+"</td>"
       + "<td><b>"+esc(r.secteur_libelle)+"</b></td>"
-      + '<td class="num tnum">'+n0(r.vol_p_cycle)+"</td>"
-      + '<td class="num tnum"><b>'+n0(r.vol_n)+"</b></td>"
-      + '<td class="num tnum mut">'+n0(r.vol_p)+"</td>"
-      + '<td class="num tnum">'+sgn(r.ecart, n0)+"</td>"
-      + '<td class="num tnum">'+sgn(r.ecart_pct, v=>NF1.format(v)+" %")+"</td>"
+      + '<td class="num tnum">'+n0(r.vol_total_p)+"</td>"
+      + '<td class="num tnum"><b>'+n0(r.vol_total_n)+"</b></td>"
+      + '<td class="num tnum mut" title="Sans les abonnés groupés, pour comparer avec l\'EGF">'+n0(r.vol_total_hors_grp_n)+"</td>"
+      + '<td class="num tnum"><b>'+sgn(r.ecart_total, n0)+"</b></td>"
+      + '<td class="num tnum">'+sgn(r.ecart_total_pct, v=>NF1.format(v)+" %")+"</td>"
+      + '<td class="num tnum">'+n0(r.nb_perdus)+"</td>"
+      + '<td class="num tnum">'+n0(r.nb_ajoutes)+"</td>"
+      + "<td>"+bCause(r.cause)+"</td>"
       + "<td>"+bGravite(r.gravite)+"</td></tr>";
   }).join("");
   const w = document.getElementById("w-g-secteurs");
@@ -2417,7 +2448,6 @@ const COLS_B = [
   {k:"etat_compteur", lab:"État compteur"},
   {k:"type_facture", lab:"Type facture"},
   {k:"vol_p_cycle", lab:"Volume N-2", num:true},
-  {k:"vol_p", lab:"Référence", num:true},
   {k:"vol_n", lab:"Volume N", num:true},
   {k:"ecart", lab:"Écart m³", num:true},
   {k:"ecart_pct", lab:"Écart %", num:true},
@@ -2655,8 +2685,7 @@ function dessinerAbonnes(){
       + '<td class="num tnum">'+n0(x.index_fin)+bloque+"</td>"
       + "<td>"+esc(x.etat_compteur||"—")+"</td>"
       + "<td>"+esc(x.type_facture||"—")+"</td>"
-      + '<td class="num tnum mut">'+n1(x.vol_p_cycle)+"</td>"
-      + '<td class="num tnum">'+n1(x.vol_p)+"</td>"
+      + '<td class="num tnum">'+n1(x.vol_p_cycle)+"</td>"
       + '<td class="num tnum">'+n1(x.vol_n)+"</td>"
       + '<td class="num tnum">'+sgn(x.ecart, n1)+"</td>"
       + '<td class="num tnum">'+sgn(x.ecart_pct, v=>NF1.format(v)+" %")+"</td>"
