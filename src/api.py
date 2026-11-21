@@ -28,6 +28,8 @@ from src import (
     alerts, config, cycles, db, etl, excel, oracle_client, queries, sse,
     watcher,
 )
+from src import mutation_gc  # onglet Mutation GC (module indépendant)
+from src import perf  # mesure + cache + compression des réponses
 
 STATIC = Path(__file__).resolve().parent / "static"
 
@@ -55,6 +57,8 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+app.include_router(mutation_gc.router)  # onglet Mutation GC
+perf.installer(app)  # accélération (cache vidé à chaque passage du watcher)
 
 
 # ============================================================
@@ -301,8 +305,9 @@ def api_alertes(
 def api_alertes_count(
     only_unack: bool = Query(True),
     cycle: int | None = Query(None),
+    zone: int | None = Query(None, ge=1, le=9, description="1 Intérieur, 2 Nouakchott, 3 Nouadhibou"),
 ) -> dict:
-    return _garde(alerts.compter, only_unack, cycle)
+    return _garde(alerts.compter, only_unack, cycle, zone)
 
 
 @app.post("/api/alertes/acknowledge", tags=["alertes"])
@@ -371,8 +376,9 @@ def api_alertes_retard(
 def api_alertes_retard_count(
     only_unack: bool = Query(True),
     cycle: int | None = Query(None),
+    zone: int | None = Query(None, ge=1, le=9, description="1 Intérieur, 2 Nouakchott, 3 Nouadhibou"),
 ) -> dict:
-    return _garde(alerts.compter_retards, only_unack, cycle)
+    return _garde(alerts.compter_retards, only_unack, cycle, zone)
 
 
 @app.post("/api/alertes-retard/acknowledge", tags=["retards"])
@@ -531,6 +537,7 @@ _COLS_REF = {
     "ref_compteur": "Réf. compteur",
     "statut_saisie": "Statut saisie",
     "date_releve": "Date relevé N",
+    "matricule_releveur": "Releveur (matricule)",
     "index_debut": "Index début N",
     "index_fin": "Index fin N",
     "index_fin_p": "Index fin N-2",
@@ -558,6 +565,7 @@ _COLS_REF_EXPORT = {
     "reference": "Référence",
     "adresse": "Adresse",
     "num_compteur": "N° compteur",
+    "matricule_releveur": "Releveur (matricule)",
     "index_debut": "Index début",
     "index_fin": "Index fin",
     "vol_p": "Volume avant (m3)",
@@ -632,6 +640,7 @@ _COLS_ALERTE = {
     "centre_libelle": "Centre",
     "secteur_num": "N° secteur",
     "secteur_libelle": "Secteur",
+    "matricule_releveur": "Releveur (matricule)",
     "cycle": "Cycle",
     "cycle_precedent": "Comparé à",
     "comparaison": "Comparaison",
@@ -740,14 +749,28 @@ def _abonnes_en_baisse(a: int, m: int, str_id: int | None,
     pops = ("bimestriel", "mensuel") if population == "tous" else (population,)
     secs: list[dict] = []
     for pop in pops:
-        secs += _garde(queries.secteurs, a, m, str_id, 0.0, True, pop)
+        # perf : liste des secteurs mémorisée jusqu'au prochain passage du watcher
+        secs += perf.memo(("secteurs", a, m, str_id, pop),
+                          lambda pop=pop: _garde(queries.secteurs, a, m, str_id,
+                                                 0.0, True, pop))
     if sects:
         secs = [x for x in secs if int(x["secteur_code"]) in sects]
+
+    # perf : abonnés de chaque secteur calculés en parallèle (4 à la fois)
+    # et mémorisés jusqu'au prochain passage du watcher.
+    def _ab(sct):
+        c, s = sct["centre_code"], sct["secteur_code"]
+        return perf.memo(("abonnes", a, m, c, s),
+                         lambda: _garde(queries.abonnes, a, m, c, s))
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        resultats = list(pool.map(_ab, secs))
+
     lignes: list[dict] = []
-    for sct in secs:
-        d = _garde(queries.abonnes, a, m, sct["centre_code"], sct["secteur_code"])
+    for sct, d in zip(secs, resultats):
         for r in d["lignes"]:
             if (r.get("ecart") or 0) < 0:
+                r = dict(r)
                 r["centre_code"] = sct["centre_code"]
                 r["secteur_code"] = sct["secteur_code"]
                 r["centre_libelle"] = sct["centre_libelle"]

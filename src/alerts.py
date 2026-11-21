@@ -198,10 +198,18 @@ _SELECT = """
         a.vol_n, a.vol_p, a.vol_total_n, a.vol_total_p, a.ecart, a.ecart_pct, a.ecart_total, a.ecart_total_pct,
         a.gravite, a.etat, a.fiabilite, a.cause,
         COALESCE(a.comparaison, 'N-2')        AS comparaison,
+        COALESCE(NULLIF(TRIM(regexp_replace(CAST(rv.MAT AS VARCHAR), '\\.0+$', '')), ''),
+                 NULLIF(TRIM(regexp_replace(CAST(sec.MAT_RELEV AS VARCHAR), '\\.0+$', '')), ''))
+                                              AS matricule_releveur,
         a.detected_at, a.updated_at, a.acknowledged, a.acknowledged_at
     FROM alertes_baisse a
     LEFT JOIN ref_centre  ce  ON ce.CENTRE_ID = a.STR_ID
     LEFT JOIN ref_secteur sec ON sec.SECT_ID  = a.SECT_ID
+    -- releveur ayant saisi le secteur sur le cycle (matricule le plus fréquent)
+    LEFT JOIN (SELECT STR_ID, SECT_ID, REL_ANNEE, REL_MOIS, MODE(MATRICULE) AS MAT
+               FROM raw_releve GROUP BY STR_ID, SECT_ID, REL_ANNEE, REL_MOIS) rv
+           ON rv.STR_ID = a.STR_ID AND rv.SECT_ID = a.SECT_ID
+          AND rv.REL_ANNEE = a.ANNEE AND rv.REL_MOIS = a.MOIS
 """
 
 
@@ -240,13 +248,17 @@ def lister(
     return rows
 
 
-def compter(only_unack: bool = True, cycle: int | None = None) -> dict:
+def compter(only_unack: bool = True, cycle: int | None = None,
+            zone: int | None = None) -> dict:
     conds, params = ["COALESCE(active, TRUE)"], []
     if only_unack:
         conds.append("acknowledged = FALSE")
     if cycle is not None:
         conds.append("cycle_key = ?")
         params.append(int(cycle))
+    if zone is not None:
+        conds.append("STR_ID IN (SELECT CENTRE_ID FROM ref_centre WHERE ZONE_ID = ?)")
+        params.append(int(zone))
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
 
     # Seules les PERTES sont additionnées : un secteur en alerte pour son
@@ -478,14 +490,27 @@ def lister_retards(
 
 
 def compter_retards(only_unack: bool = True,
-                    cycle: int | None = None) -> dict:
+                    cycle: int | None = None,
+                    zone: int | None = None) -> dict:
     conds, params = [], []
     if only_unack:
         conds.append("acknowledged = FALSE")
     if cycle is not None:
         conds.append("cycle_key = ?")
         params.append(int(cycle))
+    if zone is not None:
+        conds.append("STR_ID IN (SELECT CENTRE_ID FROM ref_centre WHERE ZONE_ID = ?)")
+        params.append(int(zone))
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
+
+    # Bandeau = situation ACTUELLE, comme l'onglet Retards : une alerte
+    # dont le secteur a été facturé depuis reste dans le journal (trace),
+    # mais ne doit plus être comptée ni garder son ancienne urgence.
+    if cycle is not None:
+        try:
+            return _compter_retards_actuels(int(cycle), where, params)
+        except Exception:  # noqa: BLE001
+            pass  # repli : comptage historique ci-dessous
 
     row = db.ligne(f"""
         SELECT
@@ -508,6 +533,41 @@ def compter_retards(only_unack: bool = True,
         "nb_proches": int(row.get("nb_proches") or 0),
         "deadline_min": row.get("deadline_min"),
         "derniere": row.get("derniere"),
+    }
+
+
+A_TRAITER_RT = ("EN_RETARD", "DEADLINE_PROCHE")
+
+
+def _compter_retards_actuels(cycle: int, where: str, params: list) -> dict:
+    """Comptage du bandeau limité aux secteurs encore à traiter maintenant,
+    avec leur urgence et leur retard du moment (queries.retards)."""
+    annee, mois = divmod(cycle, 100)
+    actuels = {}
+    from src import perf   # perf : calcul gardé jusqu'au prochain passage du watcher
+    for s in perf.memo(("retards", annee, mois), lambda: queries.retards(annee, mois)):
+        if s.get("urgence") in A_TRAITER_RT:
+            actuels[(s.get("centre_code"), s.get("secteur_code"))] = s
+    rows = db.lignes(
+        f"SELECT STR_ID, SECT_ID, parc, deadline, detected_at "
+        f"FROM alertes_retard {where}", params)
+    garde = []
+    for r in rows:
+        s = actuels.get((r["STR_ID"], r["SECT_ID"]))
+        if s is not None:
+            garde.append((r, s))
+    deadlines = [s.get("deadline") or r.get("deadline") for r, s in garde]
+    deadlines = [d for d in deadlines if d is not None]
+    detections = [r.get("detected_at") for r, _ in garde if r.get("detected_at")]
+    return {
+        "n": len(garde),
+        "nb_centres": len({r["STR_ID"] for r, _ in garde}),
+        "parc_concerne": int(sum((s.get("parc") or r.get("parc") or 0) for r, s in garde)),
+        "retard_max": int(max([(s.get("jours_retard") or 0) for _, s in garde] or [0])),
+        "nb_en_retard": sum(1 for _, s in garde if s.get("urgence") == "EN_RETARD"),
+        "nb_proches": sum(1 for _, s in garde if s.get("urgence") == "DEADLINE_PROCHE"),
+        "deadline_min": min(deadlines) if deadlines else None,
+        "derniere": max(detections) if detections else None,
     }
 
 

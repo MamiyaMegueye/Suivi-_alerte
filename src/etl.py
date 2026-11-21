@@ -218,6 +218,21 @@ def _rapide(verbeux: bool) -> dict:
             "nouvelles_alertes_retard": nbr}
 
 
+def _a_recharger(etape: str, table: str, heures: int = 24) -> bool:
+    """Vrai si la table est vide ou si son dernier chargement réussi date
+    de plus de `heures` heures (21/11/2026 : abonnements et compteurs
+    n'étaient chargés qu'à l'installation, n° compteur vide partout)."""
+    try:
+        if not db.valeur(f"SELECT COUNT(*) FROM {table}"):
+            return True
+        fin = db.valeur(
+            "SELECT MAX(fin) FROM etl_runs WHERE etape = ? AND statut = 'OK'",
+            [etape])
+        return fin is None or (datetime.now() - fin).total_seconds() > heures * 3600
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def factures_recentes(verbeux: bool = False) -> dict:
     """Factures et relevés des cycles récents — pour le détail par
     référence. Plus lourd, donc appelé un tick sur N."""
@@ -226,6 +241,15 @@ def factures_recentes(verbeux: bool = False) -> dict:
         cmin = cycle_min(6)
         nf = _etape("factures", charger_factures, cmin, verbeux=verbeux)
         nr = _etape("releves", charger_releves, cmin, verbeux=verbeux)
+        # Abonnements (secteur actuel) et compteurs (n° gravé) : une fois
+        # par jour, ou tout de suite si la table est vide. Non bloquant.
+        for nom, fn, table in (("abonnements", charger_abonnements, "raw_abonnement"),
+                               ("compteurs", charger_compteurs, "raw_compteur")):
+            try:
+                if _a_recharger(nom, table):
+                    _etape(nom, fn, verbeux=verbeux)
+            except Exception:  # noqa: BLE001
+                pass
         return {"factures": nf, "releves": nr}
 
 

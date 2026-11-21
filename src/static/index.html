@@ -612,6 +612,7 @@ main{max-width:1600px}
       </div>
     </div>
     <div class="hright">
+      <button type="button" class="mgc-pill" id="mgc-pill" style="display:none" title="Changements de compteur gros consommateurs validés, non encore vus">🔧 <span id="mgc-pill-n">0</span>&nbsp;changement(s) compteur GC</button>
       <div class="live" id="chip-sse">
         <span class="pt"><i class="ping"></i><i></i></span>
         <span>HORS LIGNE</span>
@@ -713,6 +714,8 @@ main{max-width:1600px}
       <span class="cnt" id="cnt-abonnes">0</span></button>
     <button data-v="retards"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Retards de planification
       <span class="cnt warn" id="cnt-retards">0</span></button>
+    <button data-v="mgc"><svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>Mutation GC
+      <span class="cnt" id="cnt-mgc"></span></button>
   </div>
 
   <!-- ====================================================== -->
@@ -965,6 +968,86 @@ main{max-width:1600px}
       </div>
     </section>
   </div>
+
+  <!-- ====================================================== -->
+  <!-- VUE — MUTATION GC (gros consommateurs, secteurs 04/08) -->
+  <!-- Module indépendant : src/mutation_gc.py                -->
+  <!-- ====================================================== -->
+  <style>
+    .mgc-sous{display:flex;gap:6px;margin:0 0 12px}
+    .mgc-sous button{border:1px solid var(--slate-200);background:#fff;color:var(--slate-600);border-radius:999px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer}
+    .mgc-sous button.on{background:var(--snde-700, #0A2A4E);border-color:transparent;color:#fff}
+    .mgc-sous-n{display:inline-block;min-width:18px;margin-left:4px;padding:0 6px;border-radius:999px;background:var(--rose-600);color:#fff;font-size:11px}
+    .mgc-sous-n:empty{display:none}
+    .mgc-pill{display:inline-flex;align-items:center;gap:6px;background:#EA580C;color:#fff;border:none;border-radius:999px;padding:7px 15px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(234,88,12,.45)}
+    .mgc-pill:hover{background:#C2410C}
+    @keyframes mgcPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+    .mgc-pill.flash{animation:mgcPulse .6s ease-in-out 4}
+    .mgc-new{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;font-size:10px;font-weight:700;background:var(--rose-600);color:#fff}
+    .mgc-st{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap}
+    .mgc-st.v{background:var(--rose-100);color:var(--rose-700)}
+    .mgc-st.a{background:var(--amber-100);color:var(--amber-700)}
+    .mgc-st.x{background:var(--slate-100);color:var(--slate-500)}
+    .mgc-sec{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;font-family:monospace;background:var(--snde-100);color:var(--snde-700)}
+    #v-mgc .mono{font-family:monospace;font-size:12px}
+    #v-mgc .trunc{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #v-mgc thead th{cursor:pointer;white-space:nowrap}
+    #v-mgc input[type=date]{font:inherit;font-size:13px;color:var(--slate-700);background:#fff;border:1px solid var(--slate-200);border-radius:8px;padding:5px 9px}
+  </style>
+  <div class="vue" id="v-mgc">
+    <section class="card">
+      <div class="card-b bar">
+        <label>Du <input type="date" id="mgc-d1"></label>
+        <label>au <input type="date" id="mgc-d2"></label>
+        <select id="mgc-zone">
+          <option value="">Toutes les zones</option>
+          <option value="2">Nouakchott</option>
+          <option value="3">Nouadhibou</option>
+          <option value="1">Intérieur</option>
+        </select>
+        <select id="mgc-centre"><option value="">Tous les centres</option></select>
+        <select id="mgc-statut">
+          <option value="">Tous statuts</option>
+          <option>Validé</option><option>En attente</option><option>Annulé</option>
+        </select>
+        <input type="search" id="mgc-q" placeholder="Rechercher…" style="min-width:180px">
+        <button class="primary" id="mgc-go">Charger</button>
+        <button id="mgc-vues" style="display:none">Marquer comme vues</button>
+        <button class="xls" id="mgc-xls" style="margin-left:auto"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg><span>Excel</span></button>
+      </div>
+    </section>
+
+    <div class="mgc-sous">
+      <button type="button" class="on" data-s="dem">Demandes</button>
+      <button type="button" data-s="cn">Conso nulle <span class="mgc-sous-n" id="cnt-cn"></span></button>
+    </div>
+
+    <div id="mgc-p-dem">
+    <section class="kpis" id="mgc-kpis"></section>
+
+    <section class="card">
+      <div class="card-h">
+        <div>
+          <p class="card-t">Demandes — gros consommateurs</p>
+          <p class="card-sub" id="mgc-sub">—</p>
+        </div>
+      </div>
+      <div class="twrap" id="mgc-w"><div class="msg">Choisis une période puis « Charger ».</div></div>
+    </section>
+    </div>
+
+    <div id="mgc-p-cn" style="display:none">
+    <section class="card">
+      <div class="card-h">
+        <div>
+          <p class="card-t">Anomalies — facture mutation à consommation nulle</p>
+          <p class="card-sub" id="mgc-cn-sub">Demandes validées : la facture mutation émise après la demande (≤ 45 j) a une consommation nulle. Exclu : facture précédente forfaitaire.</p>
+        </div>
+      </div>
+      <div class="twrap" id="mgc-cn-w"><div class="msg">Chargement…</div></div>
+    </section>
+    </div>
+  </div>
 </main>
 
 <script>
@@ -1116,7 +1199,78 @@ function attente(id){
   if(el) el.innerHTML = '<div class="msg">Chargement…</div>';
 }
 
+/* ---- Affichage immédiat (stale-while-revalidate) ----
+   jget renvoie tout de suite la dernière réponse connue pour cette URL
+   (mémoire, ou navigateur après un F5), puis interroge le serveur en
+   arrière-plan. Si la réponse a changé, l'écran est redessiné en silence
+   (actualiserSilencieux). Plus d'écran « Chargement… » sur un écran déjà vu. */
+const SWR = {mem: new Map(), max: 80, ttl: 12*3600*1000, maj: null};
+/* Seulement les écrans lourds ; l'état et les compteurs restent en direct. */
+const swrOk = (url)=> !/^\/api\/(etat|oracle|stream|mutation-gc|perf)/.test(url)
+                       && !/\/count\b/.test(url);
+function swrRedessiner(){
+  clearTimeout(SWR.maj);
+  SWR.maj = setTimeout(function tenter(){
+    if(typeof actualisationEnCours !== "undefined" && actualisationEnCours){
+      SWR.maj = setTimeout(tenter, 500); return;
+    }
+    try{ actualiserSilencieux(); }catch(e){}
+  }, 300);
+}
+function swrLire(url){
+  if(SWR.mem.has(url)) return SWR.mem.get(url);
+  try{
+    const s = localStorage.getItem("swr:" + url);
+    if(!s) return null;
+    const o = JSON.parse(s);
+    if(Date.now() - o.t > SWR.ttl) return null;
+    SWR.mem.set(url, o);
+    return o;
+  }catch(e){ return null; }
+}
+function swrEcrire(url, txt, d){
+  const o = {t: Date.now(), txt: txt, d: d};
+  SWR.mem.set(url, o);
+  if(SWR.mem.size > SWR.max) SWR.mem.delete(SWR.mem.keys().next().value);
+  if(txt.length > 1500000) return;            // trop gros pour le navigateur
+  try{
+    localStorage.setItem("swr:" + url, JSON.stringify({t: o.t, txt: txt, d: d}));
+    const idx = JSON.parse(localStorage.getItem("swr:index") || "[]").filter(u=>u !== url);
+    idx.push(url);
+    while(idx.length > SWR.max) localStorage.removeItem("swr:" + idx.shift());
+    localStorage.setItem("swr:index", JSON.stringify(idx));
+  }catch(e){
+    try{ // quota plein : on repart de zéro
+      JSON.parse(localStorage.getItem("swr:index") || "[]").forEach(u=>localStorage.removeItem("swr:" + u));
+      localStorage.removeItem("swr:index");
+    }catch(_){}
+  }
+}
+async function jgetReseau(url){
+  const r = await fetch(url, {cache:"no-store"});
+  if(!r.ok){
+    let d = r.status + " " + r.statusText;
+    try { const j = await r.json(); if(j.detail) d = j.detail; } catch(e){}
+    throw new Error(d);
+  }
+  const txt = await r.text();
+  const d = JSON.parse(txt);
+  if(!swrOk(url)) return {d: d, change: false};
+  const avant = SWR.mem.get(url);
+  swrEcrire(url, txt, d);
+  return {d: d, change: !avant || avant.txt !== txt};
+}
 async function jget(url){
+  const c = swrOk(url) ? swrLire(url) : null;
+  if(!swrOk(url)) return (await jgetReseau(url)).d;
+  if(c){
+    // réponse immédiate, vérification en arrière-plan
+    jgetReseau(url).then(res=>{ if(res.change) swrRedessiner(); }).catch(()=>{});
+    return structuredClone(c.d);
+  }
+  return (await jgetReseau(url)).d;
+}
+async function jgetOrigine(url){
   const r = await fetch(url, {cache:"no-store"});
   if(!r.ok){
     let d = r.status + " " + r.statusText;
@@ -1246,7 +1400,7 @@ async function majBandeau(flash){
      reste visible, seul le nombre de non consultées diminue. */
   let c, nonLues = 0;
   const cm = cleMoisCourant();
-  const q = "&cycle=" + cm;
+  const q = "&cycle=" + cm + (S.zone ? "&zone=" + S.zone : "");
   try{
     c = await jget("/api/alertes/count?only_unack=false" + q);
     nonLues = (await jget("/api/alertes/count?only_unack=true" + q)).n || 0;
@@ -1258,15 +1412,17 @@ async function majBandeau(flash){
   const total = c.n || 0;
 
   if(total > 0){
+    /* Titre = TOTAL des alertes du mois (ne diminue pas quand on consulte) ;
+       le nombre de non consultées passe en petit dans la ligne du dessous. */
     document.getElementById("band-t").textContent =
-      total + (total > 1 ? " secteurs en baisse de facturation"
-                         : " secteur en baisse de facturation")
-      + (c.seuil_m3 ? " (≥ " + n0(c.seuil_m3) + " m³)" : "")
+      n0(total) + (total > 1 ? " alertes de baisse de facturation"
+                             : " alerte de baisse de facturation")
       + " — " + MOIS_LIB[cm % 100 - 1] + " " + Math.floor(cm / 100)
-      + ", toutes zones, ordinaires + gros consommateurs"
-      + " · " + (nonLues ? n0(nonLues) + " non consultée(s)" : "toutes consultées");
+      + (c.seuil_m3 ? " (≥ " + n0(c.seuil_m3) + " m³)" : "")
+      + (S.zone ? "" : ", toutes zones");
     document.getElementById("band-s").textContent =
-      n0(c.baisse_totale) + " m³ de baisse du volume total · "
+      (nonLues ? n0(nonLues) + " non consultée(s)" : "toutes consultées") + " · "
+      + n0(c.baisse_totale) + " m³ de baisse du volume total · "
       + n0(c.nb_cause_constants) + " secteur(s) par baisse des abonnés constants, "
       + n0(c.nb_cause_perdus) + " par abonnés perdus · "
       + n0(c.nb_centres)
@@ -1323,6 +1479,7 @@ const COLS_A = [
   {k:"centre_libelle", lab:"Centre"},
   {k:"secteur_num", lab:"N°"},
   {k:"secteur_libelle", lab:"Secteur"},
+  {k:"matricule_releveur", lab:"Releveur (matricule)"},
   {k:"cycle", lab:"Cycle"},
   {k:"etat", lab:"État"},
   {k:"vol_total_p", lab:"Vol. total N-2", num:true},
@@ -1347,7 +1504,11 @@ async function ouvrirAlertes(){
     if(S.nonLues) p.set("only_unack", "true");
     if(S.centre) p.set("str_id", S.centre);
     if(S.cycle) p.set("cycle", S.cycle);
-    S.alertes = await jget("/api/alertes?" + p.toString());
+    const jeton = (S.jetonAl = (S.jetonAl || 0) + 1);   // seule la dernière demande s'affiche
+    let rep = await jget("/api/alertes?" + p.toString());
+    if(jeton !== S.jetonAl) return;
+    if(S.zone) rep = rep.filter(r=>String(r.zone_id) === String(S.zone));
+    S.alertes = rep;
     dessinerAlertes();
   }catch(e){
     document.getElementById("w-alertes").innerHTML =
@@ -1374,6 +1535,7 @@ function dessinerAlertes(){
     + "<td>"+esc(r.centre_libelle)+"</td>"
     + '<td class="tnum">'+esc(r.secteur_num)+"</td>"
     + "<td><b>"+esc(r.secteur_libelle)+"</b></td>"
+    + '<td class="tnum">'+esc(r.matricule_releveur||"—")+"</td>"
     + '<td class="tnum">'+esc(r.cycle)
       + (r.comparaison === "N-1"
           ? ' <span class="mut" title="Gros consommateur, comparé au mois précédent">(N-1)</span>'
@@ -1427,8 +1589,9 @@ async function majBandeauRetard(flash){
   const cleMois = auj.getFullYear() * 100 + (auj.getMonth() + 1);
   let nonLus = 0;
   try{
-    c = await jget("/api/alertes-retard/count?only_unack=false&cycle=" + cleMois);
-    nonLus = (await jget("/api/alertes-retard/count?only_unack=true&cycle=" + cleMois)).n || 0;
+    const qz = S.zone ? "&zone=" + S.zone : "";
+    c = await jget("/api/alertes-retard/count?only_unack=false&cycle=" + cleMois + qz);
+    nonLus = (await jget("/api/alertes-retard/count?only_unack=true&cycle=" + cleMois + qz)).n || 0;
   }catch(e){ return; }
 
   S.nbRetardNonLus = c.n || 0;
@@ -1643,7 +1806,11 @@ async function ouvrirAlertesRetard(){
   try{
     const p = new URLSearchParams();
     if(S.centre) p.set("str_id", S.centre);
-    S.alertesRetard = await jget("/api/alertes-retard?" + p.toString());
+    const jetonR = (S.jetonAlR = (S.jetonAlR || 0) + 1);  // seule la dernière demande s'affiche
+    let repR = await jget("/api/alertes-retard?" + p.toString());
+    if(jetonR !== S.jetonAlR) return;
+    if(S.zone) repR = repR.filter(r=>String(r.zone_id) === String(S.zone));
+    S.alertesRetard = repR;
     dessinerAlertesRetard();
   }catch(e){
     document.getElementById("w-al-retard").innerHTML =
@@ -2442,6 +2609,7 @@ const COLS_B = [
   {k:"adresse", lab:"Adresse"},
   {k:"num_compteur", lab:"N° compteur"},
   {k:"date_releve", lab:"Date relevé"},
+  {k:"matricule_releveur", lab:"Releveur (matricule)"},
   {k:"index_fin_p", lab:"Index N-2", num:true},
   {k:"index_debut", lab:"Index début", num:true},
   {k:"index_fin", lab:"Index fin", num:true},
@@ -2461,6 +2629,7 @@ const COLS_LB = [
   {k:"reference", lab:"Référence"},
   {k:"adresse", lab:"Adresse"},
   {k:"num_compteur", lab:"N° compteur"},
+  {k:"matricule_releveur", lab:"Releveur (matricule)"},
   {k:"index_debut", lab:"Index début", num:true},
   {k:"index_fin", lab:"Index fin", num:true},
   {k:"vol_p", lab:"Volume avant", num:true},
@@ -2495,6 +2664,10 @@ async function voirAbonnesBaisse(portee){
   document.getElementById("w-liste-baisse").innerHTML =
     '<div class="msg">Préparation de la liste…</div>';
   window.scrollTo(0, 0);
+  /* perf : beaucoup de secteurs → chargement par paquets, affichés au fur
+     et à mesure (au lieu d'attendre tous les secteurs). */
+  const lbSects = (S.lbParams.get("sects") || "").split(",").filter(Boolean);
+  if(lbSects.length > 4){ return voirAbonnesBaisseParPaquets(lbSects); }
   try{
     S.listeBaisse = await jget("/api/abonnes-baisse?"+S.lbParams.toString());
     S.triLB = S.triLB || {col:"ecart", dir:1};
@@ -2505,14 +2678,56 @@ async function voirAbonnesBaisse(portee){
   }
 }
 
+async function voirAbonnesBaisseParPaquets(ids){
+  const jeton = {}; S.lbJeton = jeton;
+  const TAILLE = 4, EN_PARALLELE = 2;
+  const paquets = [];
+  for(let i = 0; i < ids.length; i += TAILLE) paquets.push(ids.slice(i, i + TAILLE));
+  S.listeBaisse = {nb_secteurs: 0, volume_perdu: 0, lignes: [], _faits: 0, _total: ids.length};
+  S.triLB = S.triLB || {col:"ecart", dir:1};
+  document.getElementById("w-liste-baisse").innerHTML =
+    '<div class="msg">Chargement… 0 / ' + ids.length + ' secteurs</div>';
+  let erreurs = 0;
+  async function travailleur(){
+    while(paquets.length && S.lbJeton === jeton){
+      const p = paquets.shift();
+      const q = new URLSearchParams(S.lbParams); q.set("sects", p.join(","));
+      try{
+        const d = await jget("/api/abonnes-baisse?" + q.toString());
+        if(S.lbJeton !== jeton) return;
+        S.listeBaisse.nb_secteurs += d.nb_secteurs || 0;
+        S.listeBaisse.volume_perdu = Math.round(((S.listeBaisse.volume_perdu || 0) + (d.volume_perdu || 0)) * 10) / 10;
+        S.listeBaisse.lignes = S.listeBaisse.lignes.concat(d.lignes || []);
+      }catch(e){ erreurs++; }
+      S.listeBaisse._faits += p.length;
+      dessinerListeBaisse();
+    }
+  }
+  await Promise.all(Array.from({length: EN_PARALLELE}, travailleur));
+  if(S.lbJeton === jeton){
+    S.listeBaisse._total = 0;   // terminé
+    dessinerListeBaisse();
+    if(erreurs) erreur(erreurs + " paquet(s) de secteurs n'ont pas pu être chargés.");
+  }
+}
+
 function dessinerListeBaisse(){
   const d = S.listeBaisse; if(!d) return;
+  const enCours = d._total && d._faits < d._total;
+  if(enCours && !(d.lignes || []).length){
+    document.getElementById("pills-liste").innerHTML =
+      '<span class="pill">⏳ ' + d._faits + " / " + d._total + " secteurs</span>";
+    document.getElementById("w-liste-baisse").innerHTML =
+      '<div class="msg">Chargement… ' + d._faits + " / " + d._total + " secteurs</div>";
+    return;
+  }
   const rows = trier(filtreTexte(d.lignes || [],
-    ["reference","adresse","num_compteur","centre_libelle","secteur_num"]), S.triLB);
+    ["reference","adresse","num_compteur","centre_libelle","secteur_num","matricule_releveur"]), S.triLB);
   document.getElementById("pills-liste").innerHTML =
     '<span class="pill">Secteurs <b>'+n0(d.nb_secteurs)+"</b></span>"
     + '<span class="pill danger">Abonnés en baisse <b>'+n0(rows.length)+"</b></span>"
-    + '<span class="pill danger">Volume perdu <b>'+n0(d.volume_perdu)+" m³</b></span>";
+    + '<span class="pill danger">Volume perdu <b>'+n0(d.volume_perdu)+" m³</b></span>"
+    + (enCours ? '<span class="pill">⏳ ' + d._faits + " / " + d._total + " secteurs</span>" : "");
   if(!rows.length){
     document.getElementById("w-liste-baisse").innerHTML =
       '<div class="msg">Aucun abonné en baisse.</div>';
@@ -2525,6 +2740,7 @@ function dessinerListeBaisse(){
     + '<td class="tnum"><b>'+esc(x.reference)+"</b></td>"
     + '<td style="white-space:normal;max-width:260px">'+esc(x.adresse||"—")+"</td>"
     + '<td class="tnum">'+esc(x.num_compteur||"—")+"</td>"
+    + '<td class="tnum">'+esc(x.matricule_releveur||"—")+"</td>"
     + '<td class="num tnum">'+n0(x.index_debut)+"</td>"
     + '<td class="num tnum">'+n0(x.index_fin)+"</td>"
     + '<td class="num tnum">'+n1(x.vol_p)+"</td>"
@@ -2680,6 +2896,7 @@ function dessinerAbonnes(){
             + esc(x.quartier)+"</span>" : "")+"</td>"
       + '<td class="tnum">'+esc(x.num_compteur||"—")+"</td>"
       + '<td class="tnum mut">'+jour(x.date_releve)+"</td>"
+      + '<td class="tnum">'+esc(x.matricule_releveur||"—")+"</td>"
       + '<td class="num tnum">'+n0(x.index_fin_p)+"</td>"
       + '<td class="num tnum">'+n0(x.index_debut)+"</td>"
       + '<td class="num tnum">'+n0(x.index_fin)+bloque+"</td>"
@@ -2831,6 +3048,9 @@ document.getElementById("sel-zone").onchange = async (ev)=>{
   await chargerListes();
   S.avancement = []; S.retards = []; S.abonnes = null; S.gSynthese = null;
   chargerTout(); rechargerVueCourante();
+  if(document.getElementById("card-alertes").style.display !== "none") ouvrirAlertes();
+  if(document.getElementById("card-al-retard").style.display !== "none") ouvrirAlertesRetard();
+  majBandeau(false); majBandeauRetard(false);
 };
 document.getElementById("sel-centre").onchange = async (ev)=>{
   S.centre = ev.target.value; S.secteur = "";
@@ -2838,6 +3058,10 @@ document.getElementById("sel-centre").onchange = async (ev)=>{
   await chargerSecteursListe();
   S.avancement = []; S.retards = []; S.abonnes = null; S.gSynthese = null;
   rechargerVueCourante();
+  if(document.getElementById("card-alertes").style.display !== "none")
+    ouvrirAlertes();
+  if(document.getElementById("card-al-retard").style.display !== "none")
+    ouvrirAlertesRetard();
 };
 document.getElementById("sel-secteur").onchange = (ev)=>{
   S.secteur = ev.target.value;
@@ -3003,6 +3227,392 @@ document.getElementById("band-xls").onclick = (ev)=>{
   }
   await chargerListes();
   chargerTout();
+})();
+</script>
+
+<!-- ====================================================== -->
+<!-- Script — onglet Mutation GC (indépendant du reste)     -->
+<!-- ====================================================== -->
+<script>
+(function(){
+  const M = {rows: [], charge: false, tri: {col: "DATE_DEMANDE", asc: false}};
+  const VU_KEY = "mgc_vues";
+  let vues = new Set();
+  try{ vues = new Set(JSON.parse(localStorage.getItem(VU_KEY) || "[]")); }catch(e){}
+  const sauverVues = ()=>{ try{ localStorage.setItem(VU_KEY, JSON.stringify([...vues].slice(-5000))); }catch(e){} };
+  const estNouvelle = (r)=> r.STATUT === "Validé" && !vues.has(String(r.NUM_DEMANDE));
+  const $ = (id)=>document.getElementById(id);
+  const esc = (v)=> v===null||v===undefined ? "" :
+    String(v).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const iso = (d)=> d.toISOString().slice(0,10);
+  const fmtDate = (s)=>{
+    if(!s) return "—";
+    const d = new Date(s);
+    if(isNaN(d)) return esc(s);
+    const j = d.toLocaleDateString("fr-FR");
+    const h = d.getHours()||d.getMinutes()
+      ? " " + String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0") : "";
+    return j + h;
+  };
+
+  const COLS = [
+    ["NUM_DEMANDE","Num Demande"],["REF_ABONNEMENT","Réf Abo"],["CLIENT","Client"],
+    ["TYPE_DEMANDE","Type Demande"],["STATUT","Statut"],["DATE_DEMANDE","Date"],
+    ["CENTRE","Centre"],["SECTEUR","Secteur"],["NUM_COMPTEUR","Num Compteur"],
+    ["CREE_PAR","Créé par"],["ADRESSE","Adresse"]
+  ];
+
+  /* ---- Bascule d'onglet : on enveloppe sans modifier l'existant ---- */
+  const carteFiltres = (()=>{ const s = $("sel-annee"); return s ? s.closest("section.card") : null; })();
+  function sync(v){
+    const on = v === "mgc";
+    $("v-mgc").classList.toggle("on", on);
+    if(carteFiltres) carteFiltres.style.display = on ? "none" : "";
+    if(on && !M.charge) charger();
+  }
+  if(typeof ouvrirVue === "function"){
+    const orig = ouvrirVue;
+    ouvrirVue = function(v){ orig(v); sync(v); };
+  }
+  if(typeof rechargerVueCourante === "function"){
+    const origR = rechargerVueCourante;
+    rechargerVueCourante = function(){ if(typeof S !== "undefined" && S.vue === "mgc") return; origR(); };
+  }
+
+  /* ---- Données ---- */
+  function params(){
+    const p = new URLSearchParams();
+    if($("mgc-d1").value) p.set("date_debut", $("mgc-d1").value);
+    if($("mgc-d2").value) p.set("date_fin", $("mgc-d2").value);
+    return p;
+  }
+
+  /* Zone : la même que le filtre Zone global (S.zone) */
+  const zoneCour = ()=> (typeof S !== "undefined" && S.zone) ? String(S.zone) : "";
+  const zoneOk = (z)=> !zoneCour() || z === null || z === undefined || z === "" || String(z) === zoneCour();
+  let centresTous = [];
+  function dessinerCentresGC(){
+    const garde = $("mgc-centre").value;
+    const l = centresTous.filter(c=>zoneOk(c.ZONE_ID));
+    $("mgc-centre").innerHTML = '<option value="">Tous les centres</option>' +
+      l.map(c=>`<option value="${esc(c.STR_ID)}">${esc(c.CENTRE)}</option>`).join("");
+    if(l.some(c=>String(c.STR_ID) === garde)) $("mgc-centre").value = garde;
+  }
+  async function chargerCentres(){
+    try{
+      const r = await fetch("/api/mutation-gc/centres", {cache:"no-store"});
+      if(!r.ok) return;
+      centresTous = await r.json();
+      dessinerCentresGC();
+    }catch(e){}
+  }
+
+  async function charger(){
+    M.charge = true;
+    $("mgc-w").innerHTML = '<div class="msg">Chargement depuis Oracle…</div>';
+    $("mgc-sub").textContent = "—";
+    try{
+      const r = await fetch("/api/mutation-gc?" + params(), {cache:"no-store"});
+      if(!r.ok){
+        let msg = "Erreur " + r.status;
+        try{ msg = (await r.json()).detail || msg; }catch(e){}
+        throw new Error(msg);
+      }
+      M.rows = (await r.json()).rows || [];
+      try{
+        const e = await (await fetch("/api/mutation-gc/etat", {cache:"no-store"})).json();
+        M.maj = e.derniere_maj ? fmtDate(e.derniere_maj) : null;
+        M.majErr = e.erreur || null;
+      }catch(_){}
+      dessiner();
+    }catch(e){
+      M.rows = [];
+      $("mgc-kpis").innerHTML = "";
+      $("mgc-w").innerHTML = '<div class="msg">' + esc(e.message) + '</div>';
+      $("cnt-mgc").textContent = "";
+    }
+  }
+
+  function filtrees(){
+    const st = $("mgc-statut").value, ce = $("mgc-centre").value;
+    const q = $("mgc-q").value.trim().toLowerCase();
+    let rows = M.rows.filter(r=> zoneOk(r.ZONE_ID) &&
+      (!st || r.STATUT === st) && (!ce || String(r.STR_ID) === ce) &&
+      (!q || COLS.some(([c])=> String(r[c]??"").toLowerCase().includes(q))));
+    const {col, asc} = M.tri;
+    rows = rows.slice().sort((a,b)=>{
+      const x = a[col]??"", y = b[col]??"";
+      const n = String(x).localeCompare(String(y), "fr", {numeric:true});
+      return asc ? n : -n;
+    });
+    return rows;
+  }
+
+  function kpi(lab, val, cls, sub){
+    return `<div class="kpi ${cls||""}"><div class="lab">${lab}</div><div class="val">${val}</div>${sub?`<div class="sub">${sub}</div>`:""}</div>`;
+  }
+
+  function dessiner(){
+    const all = M.rows.filter(r=>zoneOk(r.ZONE_ID));
+    const nV = all.filter(r=>r.STATUT==="Validé").length;
+    const nA = all.filter(r=>r.STATUT==="En attente").length;
+    const nX = all.filter(r=>r.STATUT==="Annulé").length;
+    $("mgc-kpis").innerHTML =
+      kpi("Total GC", all.length, "info") +
+      kpi("Validées", nV, nV ? "danger" : "good", nV ? "À vérifier" : "OK") +
+      kpi("En attente", nA, "") +
+      kpi("Annulées", nX, "");
+    $("cnt-mgc").textContent = all.length ? String(all.length) : "";
+    const btn = document.querySelector('.tabs button[data-v="mgc"]');
+    if(btn) btn.classList.toggle("al-rose", nV > 0);
+
+    const rows = filtrees();
+    $("mgc-sub").textContent = rows.length + " / " + all.length + " demande(s)" +
+      (M.maj ? " — données Oracle du " + M.maj + " (mise à jour auto toutes les 5 min)" : "") +
+      (M.majErr ? " — ⚠ dernière extraction en échec : " + M.majErr : "");
+    if(!rows.length){
+      $("mgc-w").innerHTML = '<div class="msg">' +
+        (all.length ? "Aucune demande ne correspond aux filtres." : "Aucune demande de gros consommateur sur la période.") +
+        '</div>';
+      return;
+    }
+    const ar = (c)=> M.tri.col === c ? `<span class="ar">${M.tri.asc?"▲":"▼"}</span>` : "";
+    const th = COLS.map(([c,l])=>`<th data-c="${c}">${l}${ar(c)}</th>`).join("");
+    const tb = rows.map(r=>{
+      const cls = r.STATUT==="Annulé" ? "x" : r.STATUT==="Validé" ? "v" : "a";
+      const nv = estNouvelle(r);
+      const tm = r.TYPE_MUTATION ? ` <span style="color:var(--slate-400)">(${esc(r.TYPE_MUTATION)})</span>` : "";
+      return `<tr class="${nv ? "g-FORTE" : ""}">
+        <td class="mono">${esc(r.NUM_DEMANDE)}${nv ? '<span class="mgc-new">NOUVEAU</span>' : ""}</td>
+        <td class="mono">${esc(r.REF_ABONNEMENT)||"—"}</td>
+        <td class="trunc" title="${esc(r.CLIENT)}">${esc(r.CLIENT)}</td>
+        <td>${esc(r.TYPE_DEMANDE)}${tm}</td>
+        <td><span class="mgc-st ${cls}">${esc(r.STATUT)}${cls==="v"?" 🚨":""}</span></td>
+        <td style="white-space:nowrap">${fmtDate(r.DATE_DEMANDE)}</td>
+        <td class="trunc">${esc(r.CENTRE)}</td>
+        <td><span class="mgc-sec">${esc(r.SECTEUR)}</span></td>
+        <td class="mono">${esc(r.NUM_COMPTEUR)||"—"}</td>
+        <td>${esc(r.CREE_PAR)||"—"}</td>
+        <td class="trunc" title="${esc(r.ADRESSE)}">${esc(r.ADRESSE)||"—"}</td>
+      </tr>`;
+    }).join("");
+    $("mgc-w").innerHTML = `<table><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table>`;
+  }
+
+  /* ---- Événements ---- */
+  const auj = iso(new Date());
+  $("mgc-d1").value = auj;
+  $("mgc-d2").value = auj;
+  $("mgc-go").onclick = charger;
+  $("mgc-centre").onchange = dessiner;
+  $("mgc-statut").onchange = dessiner;
+  $("mgc-q").oninput = dessiner;
+  $("mgc-w").addEventListener("click", (ev)=>{
+    const th = ev.target.closest("th[data-c]");
+    if(!th) return;
+    const c = th.getAttribute("data-c");
+    M.tri = {col: c, asc: M.tri.col === c ? !M.tri.asc : true};
+    dessiner();
+  });
+  $("mgc-xls").onclick = ()=>{
+    const p = params();
+    if($("mgc-centre").value) p.set("str_id", $("mgc-centre").value);
+    if($("mgc-statut").value) p.set("statut", $("mgc-statut").value);
+    window.location.href = "/api/mutation-gc/export?" + p;
+  };
+  /* ---- Alerte : pastille orange dans l'en-tête ----
+     Les alertes sont mémorisées dans le navigateur (localStorage) : la
+     pastille reste affichée — même après un rechargement, une coupure
+     réseau, un arrêt du serveur ou le passage à minuit — jusqu'au clic
+     sur « Marquer comme vues ». */
+  const INTERVALLE_MS = 60 * 1000;
+  const ATT_KEY = "mgc_en_attente";
+  let attente = {};
+  try{ attente = JSON.parse(localStorage.getItem(ATT_KEY) || "{}") || {}; }catch(e){ attente = {}; }
+  const sauverAttente = ()=>{ try{ localStorage.setItem(ATT_KEY, JSON.stringify(attente)); }catch(e){} };
+  let dernierNb = Object.keys(attente).length;
+
+  function afficherPastille(flash){
+    const ids = Object.keys(attente).filter(id=>zoneOk(attente[id].z));
+    const pill = $("mgc-pill");
+    $("mgc-vues").style.display = ids.length ? "" : "none";
+    if(!ids.length){ pill.style.display = "none"; dernierNb = 0; return; }
+    $("mgc-pill-n").textContent = ids.length;
+    const l = ids.map(id=>attente[id]);
+    pill.title = l.slice(0,5).map(x=> (x.c||"?") + " — n° " + x.n).join("\n") + (l.length > 5 ? "\n…" : "");
+    pill.style.display = "";
+    if(flash && ids.length > dernierNb){
+      pill.classList.remove("flash"); void pill.offsetWidth; pill.classList.add("flash");
+    }
+    dernierNb = ids.length;
+  }
+
+  async function verifierAlertes(){
+    // hier + aujourd'hui : rien n'est perdu si le réseau a coupé autour de minuit
+    const auj = new Date(), hier = new Date(Date.now() - 864e5);
+    try{
+      const r = await fetch("/api/mutation-gc?date_debut=" + iso(hier) + "&date_fin=" + iso(auj), {cache:"no-store"});
+      if(!r.ok) return;                       // erreur serveur : on garde la pastille telle quelle
+      const rows = (await r.json()).rows || [];
+      let ajout = false;
+      rows.filter(estNouvelle).forEach(x=>{
+        const id = String(x.NUM_DEMANDE);
+        if(!attente[id]){ attente[id] = {n: id, c: x.CLIENT || "", d: x.DATE_DEMANDE || "", z: x.ZONE_ID ?? null}; ajout = true; }
+      });
+      if(ajout) sauverAttente();
+      afficherPastille(ajout);
+    }catch(e){}                               // réseau coupé : la pastille reste
+  }
+  $("mgc-pill").onclick = ()=>{
+    // période = de la plus ancienne alerte en attente jusqu'à aujourd'hui
+    const dates = Object.values(attente).filter(x=>zoneOk(x.z)).map(x=>String(x.d||"").slice(0,10)).filter(Boolean).sort();
+    const auj = iso(new Date());
+    $("mgc-d1").value = dates[0] && dates[0] < auj ? dates[0] : auj;
+    $("mgc-d2").value = auj;
+    $("mgc-statut").value = "Validé";
+    M.charge = false;
+    ouvrirVue("mgc");
+    if(M.charge === false) charger();
+    window.scrollTo(0, 0);
+  };
+  $("mgc-vues").onclick = ()=>{
+    // ne marque que les alertes de la zone affichée ; les autres restent en attente
+    Object.keys(attente).filter(id=>zoneOk(attente[id].z)).forEach(id=>{ vues.add(id); delete attente[id]; });
+    sauverVues();
+    sauverAttente();
+    afficherPastille(false);
+    if(M.rows.length) dessiner();
+  };
+  afficherPastille(false);                    // réaffichée tout de suite au chargement de la page
+
+  function appliquerZoneGC(){
+    $("mgc-zone").value = zoneCour();
+    dessinerCentresGC();
+    afficherPastille(false);
+    if(M.rows.length) dessiner();
+  }
+  // filtre Zone global → onglet GC + pastille
+  $("sel-zone").addEventListener("change", appliquerZoneGC);
+  // filtre Zone de l'onglet GC → filtre global (même comportement partout)
+  $("mgc-zone").onchange = ()=>{
+    const g = $("sel-zone");
+    g.value = $("mgc-zone").value;
+    g.dispatchEvent(new Event("change"));
+  };
+  $("mgc-zone").value = zoneCour();
+  function cycleAuto(){
+    verifierAlertes();
+    if(typeof S !== "undefined" && S.vue === "mgc") charger();
+  }
+  setInterval(cycleAuto, INTERVALLE_MS);
+  verifierAlertes();
+
+  /* ---- Sous-onglet « Conso nulle » ---- */
+  const CN = {rows: [], tri: {col: "DATE_DEMANDE", asc: false}, sous: "dem"};
+  const COLS_CN = [
+    ["NUM_DEMANDE","Num Demande"],["DATE_DEMANDE","Date demande"],["REF_ABONNEMENT","Réf Abo"],
+    ["CLIENT","Client"],["CENTRE","Centre"],["SECTEUR","Secteur"],["NUM_COMPTEUR","Num Compteur"],
+    ["NUM_FACTURE","N° facture mutation"],["DATE_FACTURE","Date facture"],["DELAI_JOURS","Délai"],
+    ["CONSOMMATION","Conso"],["MONTANT","Montant"],["INDEX_DEBUT","Index début"],
+    ["INDEX_FIN","Index fin"],["FACTURE_PRECEDENTE","Facture précédente"]
+  ];
+  const nf = (v)=> v===null||v===undefined||v==="" ? "—" : Number(v).toLocaleString("fr-FR");
+
+  async function chargerCN(){
+    if(CN.sous === "cn" && !CN.rows.length) $("mgc-cn-w").innerHTML = '<div class="msg">Chargement…</div>';
+    try{
+      const r = await fetch("/api/mutation-gc/conso-nulle?" + params(), {cache:"no-store"});
+      if(!r.ok){
+        let msg = "Erreur " + r.status;
+        try{ msg = (await r.json()).detail || msg; }catch(e){}
+        throw new Error(msg);
+      }
+      CN.rows = (await r.json()).rows || [];
+      dessinerCN();
+    }catch(e){
+      $("mgc-cn-w").innerHTML = '<div class="msg">' + esc(e.message) + '</div>';
+    }
+  }
+
+  function dessinerCN(){
+    const ce = $("mgc-centre").value, q = $("mgc-q").value.trim().toLowerCase();
+    const base = CN.rows.filter(r=> zoneOk(r.ZONE_ID));
+    $("cnt-cn").textContent = base.length ? String(base.length) : "";
+    let rows = base.filter(r=> (!ce || String(r.STR_ID) === ce) &&
+      (!q || COLS_CN.some(([c])=> String(r[c]??"").toLowerCase().includes(q))));
+    const {col, asc} = CN.tri;
+    rows = rows.slice().sort((a,b)=>{
+      const n = String(a[col]??"").localeCompare(String(b[col]??""), "fr", {numeric:true});
+      return asc ? n : -n;
+    });
+    $("mgc-cn-sub").textContent = rows.length + " anomalie(s)" +
+      (rows.length !== base.length ? " / " + base.length : "") +
+      " — facture mutation à consommation nulle après une demande validée (≤ 45 j). Exclu : facture précédente forfaitaire.";
+    if(!rows.length){
+      $("mgc-cn-w").innerHTML = '<div class="msg">Aucune anomalie de consommation nulle sur la période.</div>';
+      return;
+    }
+    const ar = (c)=> CN.tri.col === c ? `<span class="ar">${CN.tri.asc?"▲":"▼"}</span>` : "";
+    const th = COLS_CN.map(([c,l])=>`<th data-c="${c}">${l}${ar(c)}</th>`).join("");
+    const tb = rows.map(r=>`<tr class="g-FORTE">
+        <td class="mono">${esc(r.NUM_DEMANDE)}</td>
+        <td style="white-space:nowrap">${fmtDate(r.DATE_DEMANDE)}</td>
+        <td class="mono">${esc(r.REF_ABONNEMENT)||"—"}</td>
+        <td class="trunc" title="${esc(r.CLIENT)}">${esc(r.CLIENT)}</td>
+        <td class="trunc">${esc(r.CENTRE)}</td>
+        <td><span class="mgc-sec">${esc(r.SECTEUR)}</span></td>
+        <td class="mono">${esc(r.NUM_COMPTEUR)||"—"}</td>
+        <td class="mono">${esc(r.NUM_FACTURE)||"—"}</td>
+        <td style="white-space:nowrap">${fmtDate(r.DATE_FACTURE)}</td>
+        <td>${r.DELAI_JOURS ?? "—"} j</td>
+        <td><b style="color:var(--rose-700)">${nf(r.CONSOMMATION)}</b></td>
+        <td style="text-align:right">${nf(r.MONTANT)}</td>
+        <td style="text-align:right">${nf(r.INDEX_DEBUT)}</td>
+        <td style="text-align:right">${nf(r.INDEX_FIN)}</td>
+        <td>${esc(r.FACTURE_PRECEDENTE)||"—"}</td>
+      </tr>`).join("");
+    $("mgc-cn-w").innerHTML = `<table><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table>`;
+  }
+
+  $("mgc-cn-w").addEventListener("click", (ev)=>{
+    const th = ev.target.closest("th[data-c]");
+    if(!th) return;
+    const c = th.getAttribute("data-c");
+    CN.tri = {col: c, asc: CN.tri.col === c ? !CN.tri.asc : true};
+    dessinerCN();
+  });
+
+  function choisirSous(s){
+    CN.sous = s;
+    document.querySelectorAll(".mgc-sous button").forEach(b=>b.classList.toggle("on", b.getAttribute("data-s") === s));
+    $("mgc-p-dem").style.display = s === "dem" ? "" : "none";
+    $("mgc-p-cn").style.display  = s === "cn"  ? "" : "none";
+    $("mgc-statut").style.display = s === "dem" ? "" : "none";   // sans objet pour la conso nulle
+    if(s === "cn") dessinerCN();
+  }
+  document.querySelectorAll(".mgc-sous button").forEach(b=>
+    b.addEventListener("click", ()=> choisirSous(b.getAttribute("data-s"))));
+
+  // Les filtres existants s'appliquent aussi à la liste des anomalies
+  $("mgc-centre").addEventListener("change", dessinerCN);
+  $("mgc-q").addEventListener("input", dessinerCN);
+  $("sel-zone").addEventListener("change", ()=> setTimeout(dessinerCN, 0));
+  const chargerDem = $("mgc-go").onclick;
+  $("mgc-go").onclick = ()=>{ chargerDem(); chargerCN(); };
+  $("mgc-d1").addEventListener("change", chargerCN);
+  $("mgc-d2").addEventListener("change", chargerCN);
+  const xlsDem = $("mgc-xls").onclick;
+  $("mgc-xls").onclick = ()=>{
+    if(CN.sous !== "cn") return xlsDem();
+    const p = params();
+    if($("mgc-centre").value) p.set("str_id", $("mgc-centre").value);
+    if(zoneCour()) p.set("zone", zoneCour());
+    window.location.href = "/api/mutation-gc/conso-nulle/export?" + p;
+  };
+  setInterval(()=>{ if(typeof S !== "undefined" && S.vue === "mgc") chargerCN(); }, INTERVALLE_MS);
+  chargerCN();
+
+  chargerCentres();
 })();
 </script>
 </body>

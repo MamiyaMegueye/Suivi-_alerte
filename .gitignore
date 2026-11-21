@@ -13,3 +13,10 @@ backend/modele_objectifs/sorties/
 data/
 _sauvegarde*/
 *.bak
+
+# Sauvegardes locales
+*.avant_*
+*.annule
+Claude outputs/
+qfailure
+src/alerts-1.py

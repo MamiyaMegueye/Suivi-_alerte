@@ -113,14 +113,27 @@ _CS_DEDUP = f"""
 # abonnés groupés compris. Utilisé partout où l'on additionne des volumes.
 # Limite : une estimée antérieure à l'historique chargé (HISTORIQUE_MOIS)
 # n'est pas retrouvée, son remboursement n'est alors pas déduit.
+# Secteur de rattachement (20/11/2026, validé sur le secteur 23 du centre
+# 91, cycle 09 : 351 abonnés passés en secteur 24 entre 09 et 11) : comme
+# l'EGF, une facture est comptée dans le secteur ACTUEL de l'abonné
+# (raw_abonnement), pas dans le secteur écrit sur la facture. Sinon une
+# resectorisation apparaît comme une chute dans l'ancien secteur et une
+# hausse dans le nouveau. Repli sur le secteur de la facture si l'abonné
+# n'est pas dans raw_abonnement.
 _FM = """(
     SELECT f.* REPLACE (
                CASE WHEN f.TYPE_FACT = 0
                     THEN COALESCE(f.FAT_QTE_CONS, 0) - COALESCE(rb.vol_remb, 0)
                     ELSE f.FAT_QTE_CONS
-               END AS FAT_QTE_CONS),
-           COALESCE(rb.vol_remb, 0) AS vol_remb
+               END AS FAT_QTE_CONS,
+               COALESCE(sa.STR_ID_ACT, f.STR_ID)   AS STR_ID,
+               COALESCE(sa.SECT_ID_ACT, f.SECT_ID) AS SECT_ID),
+           COALESCE(rb.vol_remb, 0) AS vol_remb,
+           f.STR_ID  AS STR_ID_FACTURE,
+           f.SECT_ID AS SECT_ID_FACTURE
     FROM raw_facture_m f
+    -- table précalculée (src/perf.py, rafraîchie à chaque passage du watcher)
+    LEFT JOIN abn_secteur_actuel sa ON sa.sa_abn = f.ABN_ID
     LEFT JOIN (
         WITH v AS (
             SELECT FACT_ID, ABN_ID, FACT_DATE, TYPE_FACT,
@@ -823,6 +836,8 @@ def references(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
     cpt AS (
         SELECT ABN_ID, CPT_SERIE, CPI_REF
         FROM raw_compteur
+        -- perf : seulement les abonnés du secteur (au lieu de tout le pays)
+        WHERE ABN_ID IN (SELECT ABN_ID FROM fn UNION SELECT ABN_ID FROM fp)
         QUALIFY ROW_NUMBER() OVER (
             PARTITION BY ABN_ID
             ORDER BY CPI_DATE_INS DESC NULLS LAST, ID DESC
@@ -1211,7 +1226,8 @@ def abonnes(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
         SELECT ABN_ID, REL_ID, CPT_REF, REL_DATE,
                REL_INDEX, REL_ANCIEN_INDEX, REL_CONSOM_CALCUL,
                ID_COMP, COALESCE(REL_VALIDE, 0)    AS REL_VALIDE,
-               COALESCE(REL_ESTIMATIF, 0)          AS REL_ESTIMATIF
+               COALESCE(REL_ESTIMATIF, 0)          AS REL_ESTIMATIF,
+               MATRICULE                           AS MAT_RELEVEUR
         FROM raw_releve
         WHERE STR_ID = ? AND SECT_ID = ?
           AND REL_ANNEE = ? AND REL_MOIS = ?
@@ -1278,6 +1294,10 @@ def abonnes(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
     cpt AS (
         SELECT ABN_ID, CPT_SERIE, CPI_REF
         FROM raw_compteur
+        -- perf : seulement les abonnés du secteur (au lieu de tout le pays)
+        WHERE ABN_ID IN (SELECT ABN_ID FROM parc UNION SELECT ABN_ID FROM rn
+                         UNION SELECT ABN_ID FROM rp UNION SELECT ABN_ID FROM fn
+                         UNION SELECT ABN_ID FROM fp)
         QUALIFY ROW_NUMBER() OVER (
             PARTITION BY ABN_ID
             ORDER BY CPI_DATE_INS DESC NULLS LAST, ID DESC
@@ -1303,7 +1323,7 @@ def abonnes(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
             (fn.ABN_ID IS NOT NULL)                      AS a_facture,
             (rn.ABN_ID IS NOT NULL)                      AS a_releve,
             rn.CPT_REF, rn.REL_DATE, rn.REL_INDEX, rn.REL_ANCIEN_INDEX,
-            rn.REL_CONSOM_CALCUL, rn.ID_COMP,
+            rn.REL_CONSOM_CALCUL, rn.ID_COMP, rn.MAT_RELEVEUR,
             rn.REL_VALIDE, rn.REL_ESTIMATIF,
             rp.REL_INDEX_P, rp.ID_COMP_P,
             p.ABN_ADRESSE, p.COMP_ADRESSE, p.QUARTIER, p.NLOT,
@@ -1327,6 +1347,7 @@ def abonnes(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
         cpt.CPI_REF                                   AS ref_compteur,
         b.CPT_REF                                     AS ref_releve,
         b.REL_DATE                                    AS date_releve,
+        {_mat("b.MAT_RELEVEUR")}           AS matricule_releveur,
         b.REL_ANCIEN_INDEX                            AS index_debut,
         b.REL_INDEX                                   AS index_fin,
         b.REL_INDEX_P                                 AS index_fin_p,
