@@ -234,12 +234,52 @@ def _ligne_totaux(ws, df: pd.DataFrame, ligne: int, style: str) -> None:
     ws.row_dimensions[ligne].height = 22
 
 
+_RE_DT = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}")
+
+
+def _sans_heure(df: pd.DataFrame) -> pd.DataFrame:
+    """Colonnes date/heure → date seule (jour, mois, année), sans l'heure."""
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    for c in out.columns:
+        s = out[c]
+        if pd.api.types.is_datetime64_any_dtype(s):
+            out[c] = pd.to_datetime(s, errors="coerce").dt.date
+            continue
+        if not (s.dtype == object or pd.api.types.is_string_dtype(s)):
+            continue
+        nn = s.dropna()
+        if nn.empty:
+            continue
+        x = nn.iloc[0]
+        if isinstance(x, datetime) or (isinstance(x, str) and _RE_DT.match(x)):
+            def _d(v):
+                if isinstance(v, datetime):
+                    return v.date()
+                if isinstance(v, str) and _RE_DT.match(v):
+                    try:
+                        return datetime.fromisoformat(v.replace(" ", "T")[:19]).date()
+                    except ValueError:
+                        return v
+                return v
+            out[c] = s.map(_d)
+    return out
+
+
 def _ecrire(writer, df: pd.DataFrame, feuille: str, titre: str,
             sous_titre: str | None, style: str) -> None:
     nom = _nom_feuille(feuille)
     debut = 2 if sous_titre else 1
+    df = _sans_heure(df)
     df.to_excel(writer, sheet_name=nom, index=False, startrow=debut)
     styler(writer.sheets[nom], df, titre, sous_titre, style)
+    # dates : format jour/mois/année, sans heure
+    import datetime as _d
+    for ligne in writer.sheets[nom].iter_rows(min_row=debut + 2):
+        for c in ligne:
+            if isinstance(c.value, (_d.datetime, _d.date)):
+                c.number_format = "DD/MM/YYYY"
     if len(df):
         # en-tête en ligne debut+1, données jusqu'à debut+1+len(df)
         _ligne_totaux(writer.sheets[nom], df, debut + 2 + len(df), style)
@@ -254,7 +294,8 @@ def classeur(feuilles: list[tuple], style: str = "releve") -> bytes:
     devient le titre, le reste le sous-titre.
     """
     buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+    with pd.ExcelWriter(buf, engine="openpyxl", date_format="DD/MM/YYYY",
+                        datetime_format="DD/MM/YYYY") as writer:
         vide = True
         for f in feuilles:
             nom, titre, df = f[0], f[1], f[2]
@@ -276,4 +317,5 @@ def classeur(feuilles: list[tuple], style: str = "releve") -> bytes:
 
 
 def horodatage() -> str:
-    return datetime.now().strftime("%d/%m/%Y %H:%M")
+    # Date du jour seulement (pas d'heure dans les exports — 22/11/2026)
+    return datetime.now().strftime("%d/%m/%Y")

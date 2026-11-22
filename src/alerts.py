@@ -236,10 +236,7 @@ def lister(
         params,
     )
     for r in rows:
-        r["zone_lib"] = config.ZONE_LIBELLES.get(
-            int(r["zone_id"]) if r.get("zone_id") is not None else -1,
-            "(zone inconnue)",
-        )
+        config.appliquer_sous_zone(r)
         r["cycle"] = cycles.libelle_key(int(r["cycle_key"]))
         a_, m_ = cycles.depuis_key(int(r["cycle_key"]))
         ref = (cycles.mois_precedent(a_, m_) if r.get("comparaison") == "N-1"
@@ -249,16 +246,23 @@ def lister(
 
 
 def compter(only_unack: bool = True, cycle: int | None = None,
-            zone: int | None = None) -> dict:
+            zone: int | None = None, str_id: int | None = None) -> dict:
     conds, params = ["COALESCE(active, TRUE)"], []
+    if str_id is not None:
+        conds.append("STR_ID = ?")
+        params.append(int(str_id))
     if only_unack:
         conds.append("acknowledged = FALSE")
     if cycle is not None:
         conds.append("cycle_key = ?")
         params.append(int(cycle))
     if zone is not None:
-        conds.append("STR_ID IN (SELECT CENTRE_ID FROM ref_centre WHERE ZONE_ID = ?)")
-        params.append(int(zone))
+        _cs = config.centres_de_zone(zone)
+        if _cs is not None:
+            conds.append("STR_ID IN (" + ", ".join(str(x) for x in _cs) + ")")
+        else:
+            conds.append("STR_ID IN (SELECT CENTRE_ID FROM ref_centre WHERE ZONE_ID = ?)")
+            params.append(int(zone))
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
 
     # Seules les PERTES sont additionnées : un secteur en alerte pour son
@@ -481,10 +485,7 @@ def lister_retards(
         params,
     )
     for r in rows:
-        r["zone_lib"] = config.ZONE_LIBELLES.get(
-            int(r["zone_id"]) if r.get("zone_id") is not None else -1,
-            "(zone inconnue)",
-        )
+        config.appliquer_sous_zone(r)
         r["cycle"] = cycles.libelle_key(int(r["cycle_key"]))
     return rows
 
@@ -499,8 +500,12 @@ def compter_retards(only_unack: bool = True,
         conds.append("cycle_key = ?")
         params.append(int(cycle))
     if zone is not None:
-        conds.append("STR_ID IN (SELECT CENTRE_ID FROM ref_centre WHERE ZONE_ID = ?)")
-        params.append(int(zone))
+        _cs = config.centres_de_zone(zone)
+        if _cs is not None:
+            conds.append("STR_ID IN (" + ", ".join(str(x) for x in _cs) + ")")
+        else:
+            conds.append("STR_ID IN (SELECT CENTRE_ID FROM ref_centre WHERE ZONE_ID = ?)")
+            params.append(int(zone))
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
 
     # Bandeau = situation ACTUELLE, comme l'onglet Retards : une alerte

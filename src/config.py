@@ -111,6 +111,79 @@ ZONE_LIBELLES: dict[int, str] = {
 PSEUDO_STRUCTURES: tuple[int, ...] = (1, 2, 5, 6, 54, 63)
 
 
+# ------------------------------------------------------------
+# Sous-zones d'exploitation (fichier « les_centres_par_zone », 22/11/2026)
+# Codes 11 à 18 ; utilisées par le filtre Zone, les libellés de zone et
+# les exports. Un centre absent de la liste garde sa zone S_ZONE (1/2/3).
+# ------------------------------------------------------------
+SOUS_ZONES: dict[int, tuple[str, tuple[int, ...]]] = {
+    11: ("NKTT NORD", (86, 48, 96, 47, 52, 99, 98, 44, 41)),
+    12: ("NKTT OUEST", (91, 93, 97, 92, 43, 55)),
+    13: ("NKTT SUD", (46, 53, 42, 49, 90, 50, 94, 56, 45, 51, 89, 95)),  # 56 EL MINA 2
+    14: ("NOUADHIBOU", (60, 40, 80, 15)),
+    15: ("INTERIEUR EST", (33, 101, 102, 84, 71, 38, 81, 82, 34, 83, 70,
+                           32, 31, 85, 72, 37, 39, 30, 73, 35, 74, 88)),
+    16: ("INTERIEUR SUD", (104, 105, 103, 29, 67, 76, 27, 77, 106, 61, 25,
+                           65, 87, 75, 26, 36, 107, 28)),
+    17: ("INTERIEUR NORD", (66, 21, 16, 78, 17, 14, 18, 19, 20, 62)),
+    18: ("INTERIEUR TRARZA", (64, 68, 69, 23, 24, 108)),
+}
+CENTRE_SOUS_ZONE: dict[int, int] = {
+    c: z for z, (_, cs) in SOUS_ZONES.items() for c in cs}
+
+
+def sous_zone_de(centre) -> int | None:
+    try:
+        return CENTRE_SOUS_ZONE.get(int(float(centre)))
+    except (TypeError, ValueError):
+        return None
+
+
+def zone_libelle(zone_id) -> str:
+    try:
+        z = int(zone_id)
+    except (TypeError, ValueError):
+        return "(zone inconnue)"
+    if z in SOUS_ZONES:
+        return SOUS_ZONES[z][0]
+    return ZONE_LIBELLES.get(z, "(zone inconnue)")
+
+
+def appliquer_sous_zone(r: dict) -> dict:
+    """Remplace zone_id / zone_lib d'une ligne par sa sous-zone, d'après
+    son centre (centre_code, CENTRE_ID ou STR_ID)."""
+    c = None
+    for k in ("centre_code", "CENTRE_ID", "STR_ID", "str_id"):
+        if r.get(k) is not None:
+            c = r.get(k)
+            break
+    z = sous_zone_de(c)
+    if z is not None:
+        r["zone_id"] = z
+    r["zone_lib"] = zone_libelle(r.get("zone_id"))
+    return r
+
+
+def centres_de_zone(zone) -> list[int] | None:
+    """Centres d'une sous-zone (11-18) ; None pour une zone S_ZONE (1-3)."""
+    try:
+        z = int(zone)
+    except (TypeError, ValueError):
+        return None
+    return list(SOUS_ZONES[z][1]) if z in SOUS_ZONES else None
+
+
+def zone_cond(zone, col_zone: str = "zone_id",
+              col_centre: str = "centre_code") -> str:
+    """Condition SQL de filtre de zone (entiers de config uniquement)."""
+    if zone is None:
+        return "TRUE"
+    cs = centres_de_zone(zone)
+    if cs is not None:
+        return f"CAST({col_centre} AS INTEGER) IN ({', '.join(map(str, cs))})"
+    return f"{col_zone} = {int(zone)}"
+
+
 def zone_ids_list() -> list[int]:
     ids = [int(x) for x in ZONE_IDS.split(",") if x.strip()]
     return ids or [2]

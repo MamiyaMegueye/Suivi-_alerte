@@ -63,7 +63,16 @@ ORDER  BY str.STR_LIB_LT
 """
 
 
-def _sql_demandes() -> str:
+def _sql_demandes(resiliation: bool = False) -> str:
+    if resiliation:
+        filtre_type = """  -- Résiliations (règle R8 de snde-audit)
+  AND  UPPER(TRIM(td.TYPD_LIB_LT)) LIKE '%SILIATION%'"""
+    else:
+        filtre_type = """  -- Uniquement les changements de compteur (mutation « Compteur »,
+  -- hors « Référence compteur »), même règle que snde-audit R1
+  AND  TRIM(td.TYPD_LIB_LT) = 'Mutation'
+  AND  LOWER(d.MSG_MUTATION) LIKE '%compteur%'
+  AND  LOWER(d.MSG_MUTATION) NOT LIKE '%rence compteur%'"""
     return f"""
 SELECT
     TO_CHAR(d.DMD_ID)                                   AS NUM_DEMANDE,
@@ -80,6 +89,10 @@ SELECT
     str.STR_LIB_LT                                      AS CENTRE,
     LPAD(TRIM(CAST(s.SECT_CODE AS VARCHAR2(50))), 2, '0') AS SECTEUR,
     TO_CHAR(d.UTIL_TRAC)                                AS CREE_PAR,
+    -- Agent demandeur : S_DEMANDE.MAT_DEMANDEUR = S_PERSONNEL.PERS_MAT
+    -- (vérifié le 21/11/2026 : 936 → 2333 SIDI MOHAMED O/ SIDI ALY)
+    TRIM(CAST(p.MATRICULE AS VARCHAR2(50)))             AS MATRICULE_AGENT,
+    TRIM(p.PERS_NOM || ' ' || p.PERS_PRENOM)            AS NOM_AGENT,
     d.DMD_ADRESSE                                       AS ADRESSE
 FROM       {S}.S_DEMANDE      d
 JOIN       {S}.S_STRUCTURE    str ON str.STR_ID  = d.STR_ID
@@ -87,16 +100,13 @@ JOIN       {S}.S_SECTEUR      s   ON s.SECT_ID   = d.SECT_ID
 JOIN       {S}.S_TYPE_DEMANDE td  ON td.TYPD_ID  = d.TYPD_ID
 LEFT JOIN  {S}.S_ABONNEMENT   abn_nb  ON abn_nb.DMD_ID  = d.DMD_ID
 LEFT JOIN  {S}.S_ABONNEMENT   abn_anc ON abn_anc.ABN_ID = d.ABN_ANC
+LEFT JOIN  {S}.S_PERSONNEL    p   ON p.PERS_MAT = d.MAT_DEMANDEUR
 WHERE  d.DMD_DATE >= :date_debut
   AND  d.DMD_DATE <  :date_fin_excl
   AND  str.ZONE_ID IN ({config.zone_ids_sql()})
   AND  str.STR_ID NOT IN ({config.exclude_sql()})
   AND  TRIM(CAST(s.SECT_CODE AS VARCHAR2(50))) IN ('04', '4', '08', '8')
-  -- Uniquement les changements de compteur (mutation « Compteur »,
-  -- hors « Référence compteur »), même règle que snde-audit R1
-  AND  TRIM(td.TYPD_LIB_LT) = 'Mutation'
-  AND  LOWER(d.MSG_MUTATION) LIKE '%compteur%'
-  AND  LOWER(d.MSG_MUTATION) NOT LIKE '%rence compteur%'
+{filtre_type}
 ORDER  BY d.DMD_DATE DESC, d.DMD_ID DESC
 """
 
@@ -194,8 +204,11 @@ TYPE_FORFAIT = 2
 DELAI_FACT_JOURS = 45
 HISTO_JOURS = 120
 
-COLS_CN = ["NUM_DEMANDE", "DATE_DEMANDE", "REF_ABONNEMENT", "CLIENT", "CENTRE",
-           "STR_ID", "ZONE_ID", "SECTEUR", "NUM_COMPTEUR", "NUM_FACTURE",
+TYPE_ARRET = 3          # Facture Arrêt du Compte (résiliation)
+ZONES = {1: "Intérieur", 2: "Nouakchott", 3: "Nouadhibou"}
+
+COLS_CN = ["TYPE_DEMANDE", "NUM_DEMANDE", "DATE_DEMANDE", "REF_ABONNEMENT", "CLIENT", "CENTRE",
+           "STR_ID", "ZONE_ID", "SECTEUR", "NUM_COMPTEUR", "MATRICULE_AGENT", "NOM_AGENT", "NUM_FACTURE",
            "DATE_FACTURE", "DELAI_JOURS", "CONSOMMATION", "MONTANT",
            "INDEX_DEBUT", "INDEX_FIN", "FACTURE_PRECEDENTE"]
 
@@ -210,7 +223,8 @@ def _factures_abonnes(refs: list[int], depuis: date) -> pd.DataFrame:
         morceaux.append(oracle_client.requete(f"""
             SELECT fm.ABN_ID, fm.FACT_ID, fm.FACT_NUM, fm.FACT_DATE, fm.TYPE_FACT,
                    fm.FAT_QTE_CONS, fm.FACT_MNT,
-                   rel.REL_ANCIEN_INDEX AS INDEX_DEBUT, rel.REL_INDEX AS INDEX_FIN
+                   rel.REL_ANCIEN_INDEX AS INDEX_DEBUT, rel.REL_INDEX AS INDEX_FIN,
+                   TRIM(CAST(rel.MATRICULE AS VARCHAR2(50))) AS MAT_AGENT
             FROM {S}.S_FACTURE_M fm
             LEFT JOIN {S}.S_RELEVE rel ON rel.REL_ID = fm.REL_ID
             WHERE fm.ABN_ID IN ({ph})
@@ -220,7 +234,41 @@ def _factures_abonnes(refs: list[int], depuis: date) -> pd.DataFrame:
     return pd.concat(morceaux, ignore_index=True) if morceaux else pd.DataFrame()
 
 
-def _calculer_conso_nulle(dem: pd.DataFrame) -> pd.DataFrame:
+def _mat(x) -> str | None:
+    """Matricule propre : « 3155.0 » → « 3155 »."""
+    if x is None or (not isinstance(x, str) and pd.isna(x)):
+        return None
+    s = str(x).strip()
+    if s.endswith(".0"):
+        s = s[:-2]
+    return s or None
+
+
+def _conso_nulle_complet(dem: pd.DataFrame, res: pd.DataFrame | None,
+                         agents: dict | None = None) -> pd.DataFrame:
+    """Changements de compteur (facture Mutation) + résiliations (facture
+    Arrêt du compte), consommation nulle."""
+    a = _calculer_conso_nulle(dem, agents)
+    b = pd.DataFrame(columns=COLS_CN)
+    if res is not None and not res.empty:
+        b = _calculer_conso_nulle(res, None, type_fact=TYPE_ARRET,
+                                  libelle="Résiliation", exception_forfait=False,
+                                  depuis_debut_mois=True)
+    parts = [x for x in (a, b) if x is not None and not x.empty]
+    if not parts:
+        return pd.DataFrame(columns=COLS_CN)
+    out = pd.concat(parts, ignore_index=True)
+    return out.sort_values("DATE_DEMANDE", ascending=False)
+
+
+def _calculer_conso_nulle(dem: pd.DataFrame, agents: dict | None = None,
+                          type_fact: int = TYPE_MUTATION,
+                          libelle: str = "Changement compteur",
+                          exception_forfait: bool = True,
+                          depuis_debut_mois: bool = False) -> pd.DataFrame:
+    """Anomalies « conso nulle ». Si `agents` est fourni, il est rempli avec
+    NUM_DEMANDE → matricule de l'agent qui a saisi le relevé de la facture
+    de mutation (l'agent qui a fait le changement de compteur)."""
     vide = pd.DataFrame(columns=COLS_CN)
     if dem is None or dem.empty:
         return vide
@@ -247,14 +295,20 @@ def _calculer_conso_nulle(dem: pd.DataFrame) -> pd.DataFrame:
         if fa is None:
             continue
         dv = dv.sort_values("DD")
-        for _, fac in fa[fa["TYPE_FACT"] == TYPE_MUTATION].iterrows():
-            cand = dv[(dv["DD"] <= fac["FD"]) &
+        for _, fac in fa[fa["TYPE_FACT"] == type_fact].iterrows():
+            debut = (dv["DD"] - pd.to_timedelta(dv["DD"].dt.day - 1, unit="D")
+                     if depuis_debut_mois else dv["DD"])
+            cand = dv[(debut <= fac["FD"]) &
                       (fac["FD"] <= dv["DD"] + pd.Timedelta(days=DELAI_FACT_JOURS))]
             if cand.empty:
                 continue
             nd = cand.iloc[-1]["NUM_DEMANDE"]
             if nd not in retenue or fac["FD"] < retenue[nd]["FD"]:
                 retenue[nd] = fac
+
+    if agents is not None:
+        for nd, fac in retenue.items():
+            agents[nd] = _mat(fac.get("MAT_AGENT"))
 
     lignes = []
     for _, d in v.iterrows():
@@ -265,21 +319,25 @@ def _calculer_conso_nulle(dem: pd.DataFrame) -> pd.DataFrame:
         if conso is not None and not pd.isna(conso) and float(conso) != 0:
             continue
         fa = par_abn.get(str(d["REF_ABONNEMENT"]))
-        prec = fa[fa["FD"] < d["DD"]] if fa is not None else None
+        prec = (fa[(fa["FD"] < d["DD"]) & (fa["FACT_ID"] != fac["FACT_ID"])]
+                if fa is not None else None)
         type_prec = None
         if prec is not None and not prec.empty:
             type_prec = int(prec.iloc[-1]["TYPE_FACT"])
-        if type_prec == TYPE_FORFAIT:
+        if exception_forfait and type_prec == TYPE_FORFAIT:
             continue  # conso nulle justifiée par un forfait
         lignes.append({
+            "TYPE_DEMANDE": libelle,
             "NUM_DEMANDE": d["NUM_DEMANDE"], "DATE_DEMANDE": d["DATE_DEMANDE"],
             "REF_ABONNEMENT": d["REF_ABONNEMENT"], "CLIENT": d.get("CLIENT"),
             "CENTRE": d.get("CENTRE"), "STR_ID": d.get("STR_ID"),
             "ZONE_ID": d.get("ZONE_ID"), "SECTEUR": d.get("SECTEUR"),
             "NUM_COMPTEUR": d.get("NUM_COMPTEUR"),
+            "MATRICULE_AGENT": _mat(d.get("MATRICULE_AGENT")),
+            "NOM_AGENT": d.get("NOM_AGENT"),
             "NUM_FACTURE": str(fac["FACT_NUM"]) if fac["FACT_NUM"] is not None else None,
             "DATE_FACTURE": fac["FD"],
-            "DELAI_JOURS": int((fac["FD"].normalize() - d["DD"]).days),
+            "DELAI_JOURS": max(0, int((fac["FD"].normalize() - d["DD"]).days)),
             "CONSOMMATION": 0 if conso is None or pd.isna(conso) else float(conso),
             "MONTANT": None if pd.isna(fac["FACT_MNT"]) else float(fac["FACT_MNT"]),
             "INDEX_DEBUT": None if pd.isna(fac["INDEX_DEBUT"]) else float(fac["INDEX_DEBUT"]),
@@ -308,18 +366,28 @@ def _rafraichir() -> None:
             "date_debut": debut,
             "date_fin_excl": date.today() + timedelta(days=1)})
         df = _ajouter_compteurs(df)
+        agents: dict = {}
         try:
-            anoms = _calculer_conso_nulle(df)
+            res = oracle_client.requete(_sql_demandes(resiliation=True), {
+                "date_debut": debut,
+                "date_fin_excl": date.today() + timedelta(days=1)})
+            res = _ajouter_compteurs(res)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("mutation_gc : résiliations non chargées : %s", exc)
+            res = None
+        try:
+            anoms = _conso_nulle_complet(df, res, agents)
         except Exception as exc:  # noqa: BLE001
             log.warning("mutation_gc : conso nulle non calculée : %s", exc)
             anoms = _local.get("anoms")
-        _local.update(df=df, debut=debut, maj=datetime.now(), anoms=anoms,
+        # (l'agent vient maintenant de la demande : MAT_DEMANDEUR)
+        _local.update(df=df, res=res, debut=debut, maj=datetime.now(), anoms=anoms,
                       duree=round(time.time() - t0, 1), erreur=None)
         _pret.set()
         try:
             with open(_FICHIER, "wb") as f:
-                pickle.dump({"df": df, "debut": debut, "maj": _local["maj"],
-                             "anoms": anoms}, f)
+                pickle.dump({"df": df, "res": res, "debut": debut,
+                             "maj": _local["maj"], "anoms": anoms}, f)
         except Exception:  # noqa: BLE001
             pass
         log.info("mutation_gc : %d demandes chargées en %.1fs", len(df), _local["duree"])
@@ -341,8 +409,8 @@ def _demarrer() -> None:
     try:
         with open(_FICHIER, "rb") as f:
             sauv = pickle.load(f)
-        _local.update(df=sauv["df"], debut=sauv["debut"], maj=sauv["maj"],
-                      anoms=sauv.get("anoms"))
+        _local.update(df=sauv["df"], res=sauv.get("res"), debut=sauv["debut"],
+                      maj=sauv["maj"], anoms=sauv.get("anoms"))
         _pret.set()
     except Exception:  # noqa: BLE001
         pass
@@ -352,8 +420,32 @@ def _demarrer() -> None:
 _demarrer()
 
 
+NATURE_CC, NATURE_RES = "Changement compteur", "Résiliation"
+
+
 def _demandes(date_debut: date | None, date_fin: date | None,
               str_id: int | None) -> pd.DataFrame:
+    """Onglet Demandes : changements de compteur + résiliations (colonne NATURE)."""
+    cc = _demandes_cc(date_debut, date_fin, str_id)
+    try:  # une panne Oracle sur les résiliations ne bloque pas l'onglet
+        rs = _demandes_cc(date_debut, date_fin, str_id, resiliation=True)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("mutation_gc : résiliations indisponibles : %s", exc)
+        rs = None
+    parts = []
+    if cc is not None and not cc.empty:
+        parts.append(cc.assign(NATURE=NATURE_CC))
+    if rs is not None and not rs.empty:
+        parts.append(rs.assign(NATURE=NATURE_RES))
+    if not parts:
+        return (cc if cc is not None else pd.DataFrame()).assign(NATURE=None)
+    out = pd.concat(parts, ignore_index=True)
+    dd = pd.to_datetime(out["DATE_DEMANDE"], errors="coerce")
+    return out.assign(_dd=dd).sort_values("_dd", ascending=False).drop(columns="_dd")
+
+
+def _demandes_cc(date_debut: date | None, date_fin: date | None,
+                 str_id: int | None, resiliation: bool = False) -> pd.DataFrame:
     d1 = date_debut or date.today()
     d2 = date_fin or d1
     if d2 < d1:
@@ -362,7 +454,7 @@ def _demandes(date_debut: date | None, date_fin: date | None,
     # Période couverte par la copie locale → lecture instantanée
     if not _pret.is_set():
         _pret.wait(timeout=180)  # tout premier démarrage
-    loc = _local["df"]
+    loc = _local.get("res") if resiliation else _local["df"]
     if loc is not None and _local["debut"] and d1 >= _local["debut"]:
         dd = pd.to_datetime(loc["DATE_DEMANDE"], errors="coerce").dt.date
         df = loc[(dd >= d1) & (dd <= d2)]
@@ -371,13 +463,13 @@ def _demandes(date_debut: date | None, date_fin: date | None,
         return df
 
     # Période plus ancienne → Oracle à la demande
-    cle = (d1, d2)
+    cle = (d1, d2, resiliation)
     with _cache_lock:  # une seule requête Oracle à la fois par période
         hit = _cache.get(cle)
         if hit and time.time() - hit[0] < CACHE_SEC:
             df = hit[1]
         else:
-            df = _executer(_sql_demandes(), {
+            df = _executer(_sql_demandes(resiliation=resiliation), {
                 "date_debut": d1, "date_fin_excl": d2 + timedelta(days=1)})
             df = _ajouter_compteurs(df)
             _cache[cle] = (time.time(), df)
@@ -389,10 +481,20 @@ def _demandes(date_debut: date | None, date_fin: date | None,
     return df
 
 
+def _sz(df: pd.DataFrame) -> pd.DataFrame:
+    """ZONE_ID → sous-zone (11-18) d'après le centre (config.SOUS_ZONES)."""
+    if df is None or df.empty or "STR_ID" not in df.columns:
+        return df
+    out = df.copy()
+    sz = out["STR_ID"].map(config.sous_zone_de)
+    out["ZONE_ID"] = sz.where(sz.notna(), out.get("ZONE_ID"))
+    return out
+
+
 def _records(df: pd.DataFrame) -> list[dict]:
     if df.empty:
         return []
-    out = df.copy()
+    out = _sz(df)
     if "DATE_DEMANDE" in out.columns:
         out["DATE_DEMANDE"] = pd.to_datetime(out["DATE_DEMANDE"], errors="coerce")
         out["DATE_DEMANDE"] = out["DATE_DEMANDE"].dt.strftime("%Y-%m-%dT%H:%M:%S")
@@ -434,6 +536,7 @@ def mgc_liste(
 
 
 COLONNES_EXPORT = [
+    ("NATURE", "Type"),
     ("NUM_DEMANDE", "Num Demande"),
     ("REF_ABONNEMENT", "Réf Abo"),
     ("CLIENT", "Client"),
@@ -445,6 +548,8 @@ COLONNES_EXPORT = [
     ("SECTEUR", "Secteur"),
     ("NUM_COMPTEUR", "Num Compteur"),
     ("CREE_PAR", "Créé par"),
+    ("MATRICULE_AGENT", "Agent (matricule)"),
+    ("NOM_AGENT", "Agent (nom)"),
     ("ADRESSE", "Adresse"),
 ]
 
@@ -460,11 +565,13 @@ def _conso_nulle(date_debut: date | None, date_fin: date | None,
     if _local["debut"] and d1 >= _local["debut"]:
         an = _local.get("anoms")
         if an is None:                       # ancienne copie sans ce calcul
-            an = _calculer_conso_nulle(_local["df"])
+            an = _calculer_conso_nulle(_local["df"])   # copie ancienne : sans résiliations
             _local["anoms"] = an
     else:                                    # période ancienne : calcul à la demande
         try:
-            an = _calculer_conso_nulle(_demandes(d1, d2, None))
+            res_old = _executer(_sql_demandes(resiliation=True), {
+                "date_debut": d1, "date_fin_excl": d2 + timedelta(days=1)})
+            an = _conso_nulle_complet(_demandes_cc(d1, d2, None), res_old)
         except HTTPException:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -481,7 +588,7 @@ def _conso_nulle(date_debut: date | None, date_fin: date | None,
 def _records_cn(df: pd.DataFrame) -> list[dict]:
     if df.empty:
         return []
-    out = df.copy()
+    out = _sz(df)
     for c in ("DATE_DEMANDE", "DATE_FACTURE"):
         out[c] = pd.to_datetime(out[c], errors="coerce").dt.strftime("%Y-%m-%dT%H:%M:%S")
     out = out.astype(object).where(pd.notna(out), None)
@@ -499,9 +606,11 @@ def mgc_conso_nulle(
 
 
 COLONNES_EXPORT_CN = [
-    ("NUM_DEMANDE", "Num Demande"), ("DATE_DEMANDE", "Date demande"),
+    ("TYPE_DEMANDE", "Type"), ("NUM_DEMANDE", "Num Demande"), ("DATE_DEMANDE", "Date demande"),
     ("REF_ABONNEMENT", "Réf Abo"), ("CLIENT", "Client"), ("CENTRE", "Centre"),
     ("SECTEUR", "Secteur"), ("NUM_COMPTEUR", "Num Compteur"),
+    ("MATRICULE_AGENT", "Agent (matricule)"),
+    ("NOM_AGENT", "Agent (nom)"),
     ("NUM_FACTURE", "N° facture mutation"), ("DATE_FACTURE", "Date facture"),
     ("DELAI_JOURS", "Délai (j)"), ("CONSOMMATION", "Consommation"),
     ("MONTANT", "Montant"), ("INDEX_DEBUT", "Index début"), ("INDEX_FIN", "Index fin"),
@@ -517,19 +626,26 @@ def mgc_conso_nulle_export(
     zone: int | None = Query(None),
 ):
     from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.styles import (Alignment, Border, Font, GradientFill,
+                                 PatternFill, Side)
 
     df = _conso_nulle(date_debut, date_fin, str_id)
     if zone is not None and not df.empty:
+        df = _sz(df)
         df = df[df["ZONE_ID"] == int(zone)]
     wb = Workbook()
     ws = wb.active
     ws.title = "Conso nulle"
     ws.append([lib for _, lib in COLONNES_EXPORT_CN])
+    # En-tête beige en dégradé, texte brun foncé
+    trait = Side(style="thin", color="D9C7A3")
     for c in ws[1]:
-        c.fill = PatternFill("solid", fgColor="9F1239")
-        c.font = Font(bold=True, color="FFFFFF")
-        c.alignment = Alignment(vertical="center")
+        c.fill = GradientFill(type="linear", degree=90,
+                              stop=("F7EEDC", "E3CFA6"))
+        c.font = Font(bold=True, color="5C4528")
+        c.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
+        c.border = Border(bottom=Side(style="medium", color="B8996A"))
+    ws.row_dimensions[1].height = 30
     for _, r in df.iterrows():
         ligne = []
         for col, _ in COLONNES_EXPORT_CN:
@@ -540,18 +656,126 @@ def mgc_conso_nulle_export(
                 val = pd.Timestamp(val).to_pydatetime()
             ligne.append(val)
         ws.append(ligne)
+    # Lignes alternées beige très clair / blanc, fines bordures beige
+    zebre = PatternFill("solid", fgColor="FBF6EC")
+    for n, ligne_xl in enumerate(ws.iter_rows(min_row=2), start=0):
+        for c in ligne_xl:
+            if n % 2 == 0:
+                c.fill = zebre
+            c.border = Border(bottom=trait)
+            c.font = Font(color="3F3324")
     for i, (col, _) in enumerate(COLONNES_EXPORT_CN, start=1):
         lettre = ws.cell(row=1, column=i).column_letter
         ws.column_dimensions[lettre].width = 30 if col in ("CLIENT", "CENTRE") else 15
         if col in ("DATE_DEMANDE", "DATE_FACTURE"):
             for cell in ws[lettre][1:]:
-                cell.number_format = "dd/mm/yyyy hh:mm"
+                if isinstance(cell.value, datetime):
+                    cell.value = cell.value.date()   # jour seulement, sans l'heure
+                cell.number_format = "dd/mm/yyyy"
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
     nom = f"mutation_gc_conso_nulle_{date.today():%Y%m%d}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nom}"'},
+    )
+
+
+@router.get("/api/mutation-gc/conso-nulle/synthese")
+def mgc_conso_nulle_synthese(
+    date_debut: date | None = Query(None),
+    date_fin: date | None = Query(None),
+    str_id: int | None = Query(None),
+    zone: int | None = Query(None),
+):
+    """Synthèse pour la direction : nombre d'anomalies « conso nulle » par
+    centre, changements de compteur et résiliations."""
+    from openpyxl import Workbook
+    from openpyxl.styles import (Alignment, Border, Font, GradientFill,
+                                 PatternFill, Side)
+
+    d1 = date_debut or date.today()
+    d2 = date_fin or d1
+    df = _conso_nulle(d1, d2, str_id)
+    if zone is not None and not df.empty:
+        df = _sz(df)
+        df = df[df["ZONE_ID"] == int(zone)]
+
+    lignes = []
+    if not df.empty:
+        g = (df.assign(n=1)
+               .pivot_table(index="CENTRE", columns="TYPE_DEMANDE", values="n",
+                            aggfunc="sum", fill_value=0))
+        for centre, r in g.iterrows():
+            cc = int(r.get("Changement compteur", 0))
+            rs = int(r.get("Résiliation", 0))
+            lignes.append((str(centre), cc, rs, cc + rs))
+        lignes.sort(key=lambda x: (-x[3], x[0]))
+    tot_cc = sum(x[1] for x in lignes)
+    tot_rs = sum(x[2] for x in lignes)
+
+    brun, brun_fonce = "1F3A5F", "17304F"
+    entete_fill = GradientFill(type="linear", degree=90, stop=("DCEBF8", "A9CBEA"))
+    total_fill = GradientFill(type="linear", degree=90, stop=("C9DFF3", "8DB6DE"))
+    zebre = PatternFill("solid", fgColor="F2F7FC")
+    trait = Side(style="thin", color="C3D6EA")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Synthèse DG"
+    ws.sheet_view.showGridLines = False
+    ws.merge_cells("A1:D1")
+    ws["A1"] = "Anomalies « consommation nulle » — gros consommateurs (secteurs 04 / 08)"
+    ws["A1"].font = Font(bold=True, size=14, color=brun)
+    ws.merge_cells("A2:D2")
+    ws["A2"] = (f"Demandes validées du {d1:%d/%m/%Y} au {d2:%d/%m/%Y}"
+                + (f" — zone {config.zone_libelle(zone)}" if zone is not None else " — toutes zones")
+                + f" — édité le {datetime.now():%d/%m/%Y}")
+    ws["A2"].font = Font(italic=True, size=10, color="4A6688")
+    ws.row_dimensions[1].height = 24
+
+    entetes = ["Centre", "Changement de compteur", "Résiliation", "Total"]
+    ws.append([])
+    ws.append(entetes)
+    for c in ws[4]:
+        c.fill = entete_fill
+        c.font = Font(bold=True, color=brun)
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = Border(bottom=Side(style="medium", color="6F9CCB"))
+    ws.row_dimensions[4].height = 30
+
+    for i, (centre, cc, rs, tt) in enumerate(lignes):
+        ws.append([centre, cc, rs, tt])
+        for c in ws[ws.max_row]:
+            if i % 2 == 0:
+                c.fill = zebre
+            c.border = Border(bottom=trait)
+            c.font = Font(color=brun_fonce, bold=(c.column == 4))
+            if c.column > 1:
+                c.alignment = Alignment(horizontal="center")
+
+    ws.append(["TOTAL", tot_cc, tot_rs, tot_cc + tot_rs])
+    for c in ws[ws.max_row]:
+        c.fill = total_fill
+        c.font = Font(bold=True, color=brun)
+        c.border = Border(top=Side(style="medium", color="6F9CCB"))
+        if c.column > 1:
+            c.alignment = Alignment(horizontal="center")
+    if not lignes:
+        ws.append(["Aucune anomalie sur la période."])
+
+    ws.column_dimensions["A"].width = 32
+    for col in "BCD":
+        ws.column_dimensions[col].width = 20
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    nom = f"synthese_conso_nulle_{date.today():%Y%m%d}.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -602,7 +826,9 @@ def mgc_export(
         ws.column_dimensions[lettre].width = 30 if col in ("CLIENT", "ADRESSE", "CENTRE") else 16
         if col == "DATE_DEMANDE":
             for cell in ws[lettre][1:]:
-                cell.number_format = "dd/mm/yyyy hh:mm"
+                if isinstance(cell.value, datetime):
+                    cell.value = cell.value.date()   # jour seulement
+                cell.number_format = "dd/mm/yyyy"
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
 

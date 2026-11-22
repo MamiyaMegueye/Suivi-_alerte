@@ -151,7 +151,7 @@ def api_synthese(
         "bimestriel", pattern="^(bimestriel|mensuel)$",
         description="bimestriel (N-2) ou mensuel (gros consommateurs, N-1)",
     ),
-    zone: int | None = Query(None, ge=1, le=9, description="1 Intérieur, 2 Nouakchott, 3 Nouadhibou"),
+    zone: int | None = Query(None, ge=1, le=99, description="1-3 zones S_ZONE, 11-18 sous-zones"),
 ) -> dict:
     a, m = _cycle(cycle, annee, mois)
     return _garde(queries.synthese, a, m, population, zone)
@@ -166,7 +166,7 @@ def api_centres(
         "bimestriel", pattern="^(bimestriel|mensuel)$",
         description="bimestriel (N-2) ou mensuel (gros consommateurs, N-1)",
     ),
-    zone: int | None = Query(None, ge=1, le=9, description="1 Intérieur, 2 Nouakchott, 3 Nouadhibou"),
+    zone: int | None = Query(None, ge=1, le=99, description="1-3 zones S_ZONE, 11-18 sous-zones"),
 ) -> list[dict]:
     a, m = _cycle(cycle, annee, mois)
     return _garde(queries.centres, a, m, population, zone)
@@ -189,7 +189,7 @@ def api_secteurs(
         "bimestriel", pattern="^(bimestriel|mensuel)$",
         description="bimestriel (N-2) ou mensuel (gros consommateurs, N-1)",
     ),
-    zone: int | None = Query(None, ge=1, le=9, description="1 Intérieur, 2 Nouakchott, 3 Nouadhibou"),
+    zone: int | None = Query(None, ge=1, le=99, description="1-3 zones S_ZONE, 11-18 sous-zones"),
 ) -> list[dict]:
     a, m = _cycle(cycle, annee, mois)
     return _garde(queries.secteurs, a, m, str_id, baisse_min_pct, not toutes,
@@ -305,9 +305,10 @@ def api_alertes(
 def api_alertes_count(
     only_unack: bool = Query(True),
     cycle: int | None = Query(None),
-    zone: int | None = Query(None, ge=1, le=9, description="1 Intérieur, 2 Nouakchott, 3 Nouadhibou"),
+    zone: int | None = Query(None, ge=1, le=99, description="1-3 zones S_ZONE, 11-18 sous-zones"),
+    str_id: int | None = Query(None),
 ) -> dict:
-    return _garde(alerts.compter, only_unack, cycle, zone)
+    return _garde(alerts.compter, only_unack, cycle, zone, str_id)
 
 
 @app.post("/api/alertes/acknowledge", tags=["alertes"])
@@ -376,7 +377,7 @@ def api_alertes_retard(
 def api_alertes_retard_count(
     only_unack: bool = Query(True),
     cycle: int | None = Query(None),
-    zone: int | None = Query(None, ge=1, le=9, description="1 Intérieur, 2 Nouakchott, 3 Nouadhibou"),
+    zone: int | None = Query(None, ge=1, le=99, description="1-3 zones S_ZONE, 11-18 sous-zones"),
 ) -> dict:
     return _garde(alerts.compter_retards, only_unack, cycle, zone)
 
@@ -696,7 +697,7 @@ def export_secteurs(
         "bimestriel", pattern="^(bimestriel|mensuel)$",
         description="bimestriel (N-2) ou mensuel (gros consommateurs, N-1)",
     ),
-    zone: int | None = Query(None, ge=1, le=9, description="1 Intérieur, 2 Nouakchott, 3 Nouadhibou"),
+    zone: int | None = Query(None, ge=1, le=99, description="1-3 zones S_ZONE, 11-18 sous-zones"),
 ) -> Response:
     a, m = _cycle(cycle, annee, mois)
     syn = _garde(queries.synthese, a, m, population, zone)
@@ -1030,19 +1031,231 @@ def export_retards(
 def export_alertes(
     only_unack: bool = Query(False),
     cycle: int | None = Query(None),
+    zone: int | None = Query(None, ge=1, le=99),
+    str_id: int | None = Query(None),
 ) -> Response:
-    rows = _garde(alerts.lister, only_unack, cycle, None, 2000)
+    rows = _garde(alerts.lister, only_unack, cycle, str_id, 2000)
+    if zone is not None:
+        rows = [r for r in rows if str(r.get("zone_id")) == str(zone)]
+    if str_id is not None:
+        return _export_alertes_centre(rows, cycle, str_id)
     titre = (
         ("Alertes non consultées — " if only_unack
          else "Journal des alertes — ")
         + f"généré le {excel.horodatage()}"
     )
-    return _xlsx(
-        excel.classeur([
-            ("Alertes", titre, _mise_en_forme(rows, _COLS_ALERTE)),
-        ]),
-        "alertes_baisse.xlsx",
-    )
+    # Organisé zone par zone (puis centre, secteur) : une feuille
+    # « Toutes zones » triée + une feuille par zone.
+    def _cle(r):
+        z = str(r.get("zone_lib") or "")
+        try:
+            zk = int(r.get("zone_id"))
+        except (TypeError, ValueError):
+            zk = 99
+        return (zk, z, str(r.get("centre_libelle") or ""),
+                str(r.get("secteur_num") or "").zfill(3))
+
+    rows = sorted(rows, key=_cle)
+    feuilles = [("Toutes zones", titre, _mise_en_forme(rows, _COLS_ALERTE))]
+    zones = []
+    for r in rows:
+        z = r.get("zone_lib") or "Sans zone"
+        if z not in zones:
+            zones.append(z)
+    for z in zones:
+        sous = [r for r in rows if (r.get("zone_lib") or "Sans zone") == z]
+        feuilles.append((
+            str(z)[:31],
+            f"Alertes — zone {z} ({len(sous)}) — généré le {excel.horodatage()}",
+            _mise_en_forme(sous, _COLS_ALERTE),
+        ))
+    return _xlsx(excel.classeur(feuilles), "alertes_baisse.xlsx")
+
+
+_COLS_ALERTE_CENTRE = {k: v for k, v in _COLS_ALERTE.items()
+                       if k not in ("acknowledged", "acknowledged_at")}
+
+
+def _export_alertes_centre(rows: list[dict], cycle: int | None,
+                           str_id: int) -> Response:
+    """Fichier destiné au centre : 1 feuille total par secteur,
+    1 feuille détail par abonné (abonnés en baisse des secteurs en alerte)."""
+    rows = sorted(rows, key=lambda r: str(r.get("secteur_num") or "").zfill(3))
+    nom = rows[0]["centre_libelle"] if rows else f"centre {str_id}"
+    lignes: list[dict] = []
+    if rows:
+        a, m = _cycle(cycle, None, None)
+        sects = {int(r["secteur_code"]) for r in rows}
+        _, lignes = _abonnes_en_baisse(a, m, int(str_id), "tous", sects)
+    cols_ab = {**_COLS_REF_EXPORT,
+               "part_baisse": "Part de la baisse du secteur (%)",
+               "ecart_secteur": "Écart du secteur (m3)"}
+    h = excel.horodatage()
+    feuilles = [
+        ("Total par secteur",
+         f"Alertes de baisse — {nom} — {len(rows)} secteur(s) — généré le {h}",
+         _mise_en_forme(rows, _COLS_ALERTE_CENTRE)),
+        ("Detail abonnes",
+         f"Détail par abonné — {nom} — {len(lignes)} abonné(s) en baisse — généré le {h}",
+         _mise_en_forme(lignes, cols_ab)),
+    ]
+    propre = "".join(ch if ch.isalnum() else "_" for ch in str(nom)).strip("_")
+    return _xlsx(excel.classeur(feuilles), f"alertes_{propre}.xlsx")
+
+
+@app.get("/api/export/alertes/synthese-dg", tags=["export"])
+def export_alertes_synthese_dg(
+    cycle: int | None = Query(None),
+    zone: int | None = Query(None, ge=1, le=99),
+) -> Response:
+    """Synthèse DG : par zone et centre (sous-totaux par zone), puis par
+    secteur. Indépendante des filtres de l'écran (totaux nationaux)."""
+    import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, GradientFill, PatternFill, Side
+    from datetime import datetime as _dt
+
+    rows = _garde(alerts.lister, False, cycle, None, 2000)
+    if zone is not None:
+        rows = [r for r in rows if str(r.get("zone_id")) == str(zone)]
+
+    def _n(x):
+        try:
+            return float(x or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _zk(r):
+        try:
+            return int(r.get("zone_id"))
+        except (TypeError, ValueError):
+            return 99
+    rows = sorted(rows, key=lambda r: (_zk(r), str(r.get("centre_libelle") or ""),
+                                       str(r.get("secteur_num") or "").zfill(3)))
+
+    def _agg(lst):
+        p = sum(_n(r.get("vol_total_p")) for r in lst)
+        n = sum(_n(r.get("vol_total_n")) for r in lst)
+        return {"nb": len(lst),
+                "fortes": sum(1 for r in lst if r.get("gravite") == "FORTE"),
+                "p": round(p), "n": round(n), "e": round(n - p),
+                "pct": round(100 * (n - p) / p, 1) if p else None}
+
+    # --- style bleu ---
+    bleu, bleu_f = "1F3A5F", "17304F"
+    f_ent = GradientFill(type="linear", degree=90, stop=("DCEBF8", "A9CBEA"))
+    f_sz = GradientFill(type="linear", degree=90, stop=("E6F0FA", "C4DAF0"))
+    f_tot = GradientFill(type="linear", degree=90, stop=("C9DFF3", "8DB6DE"))
+    zebre = PatternFill("solid", fgColor="F5F9FD")
+    trait = Side(style="hair", color="C3D6EA")
+    fort = Side(style="thin", color="6F9CCB")
+    nf = "#,##0"
+
+    per = rows[0]["cycle"] if rows else ""
+    zl = config.zone_libelle(zone) if zone is not None else "toutes zones"
+    h = excel.horodatage()
+    wb = Workbook()
+
+    def _feuille(ws, titre, entetes, larg):
+        ws.sheet_view.showGridLines = False
+        nc = len(entetes)
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=nc)
+        ws.cell(1, 1, titre).font = Font(bold=True, size=14, color=bleu)
+        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=nc)
+        ws.cell(2, 1, f"Cycle {per} — généré le {_dt.now():%d/%m/%Y}").font = Font(italic=True, size=10, color="4A6688")
+        for j, e in enumerate(entetes, 1):
+            c = ws.cell(4, j, e)
+            c.fill = f_ent
+            c.font = Font(bold=True, color=bleu)
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            c.border = Border(bottom=fort)
+        ws.row_dimensions[4].height = 32
+        for j, w in enumerate(larg, 1):
+            ws.column_dimensions[ws.cell(4, j).column_letter].width = w
+        ws.freeze_panes = "A5"
+
+    def _ligne(ws, vals, kind, i=0, num_from=3):
+        ws.append(vals)
+        rr = ws.max_row
+        for j in range(1, len(vals) + 1):
+            c = ws.cell(rr, j)
+            if kind == "sz":
+                c.fill = f_sz; c.font = Font(bold=True, color=bleu)
+                c.border = Border(top=fort, bottom=fort)
+            elif kind == "tot":
+                c.fill = f_tot; c.font = Font(bold=True, color=bleu, size=12)
+                c.border = Border(top=Side(style="medium", color="3F6FA3"))
+            else:
+                if i % 2 == 0:
+                    c.fill = zebre
+                c.font = Font(color=bleu_f)
+                c.border = Border(bottom=trait)
+            if j >= num_from:
+                c.alignment = Alignment(horizontal="center")
+                if isinstance(c.value, (int, float)):
+                    c.number_format = nf
+
+    # ---------- Feuille 1 : par zone et centre ----------
+    ws = wb.active
+    ws.title = "Par zone et centre"
+    _feuille(ws, "Synthèse DG — baisses de facturation par zone et centre",
+             ["Zone", "Centre", "Secteurs en alerte", "dont baisses fortes",
+              "Volume N-2 (m3)", "Volume N (m3)", "Baisse (m3)", "Variation (%)"],
+             [26, 30, 14, 14, 16, 16, 15, 13])
+    zones_ord = []
+    for r in rows:
+        if r.get("zone_lib") not in zones_ord:
+            zones_ord.append(r.get("zone_lib"))
+    for zlib in zones_ord:
+        rz = [r for r in rows if r.get("zone_lib") == zlib]
+        centres = []
+        for r in rz:
+            if r.get("centre_libelle") not in centres:
+                centres.append(r.get("centre_libelle"))
+        for i, ce in enumerate(centres):
+            a = _agg([r for r in rz if r.get("centre_libelle") == ce])
+            _ligne(ws, [zlib, ce, a["nb"], a["fortes"], a["p"], a["n"], a["e"], a["pct"]], "", i)
+        a = _agg(rz)
+        _ligne(ws, [f"TOTAL {zlib}", f"{len(centres)} centre(s)", a["nb"], a["fortes"],
+                    a["p"], a["n"], a["e"], a["pct"]], "sz")
+    a = _agg(rows)
+    nb_c = len({r.get("centre_libelle") for r in rows})
+    _ligne(ws, ["TOTAL GÉNÉRAL", f"{nb_c} centre(s)", a["nb"], a["fortes"],
+                a["p"], a["n"], a["e"], a["pct"]], "tot")
+    if not rows:
+        ws.append(["Aucune alerte sur ce cycle."])
+
+    # ---------- Feuille 2 : par secteur ----------
+    ws2 = wb.create_sheet("Par secteur")
+    _feuille(ws2, "Synthèse DG — détail par secteur",
+             ["Zone", "Centre", "Secteur", "Nom du secteur", "Comparaison",
+              "Volume N-2 (m3)", "Volume N (m3)", "Baisse (m3)", "Variation (%)", "Gravité"],
+             [26, 26, 10, 28, 13, 16, 16, 15, 13, 12])
+    for zlib in zones_ord:
+        rz = [r for r in rows if r.get("zone_lib") == zlib]
+        for i, r in enumerate(rz):
+            _ligne(ws2, [zlib, r.get("centre_libelle"), r.get("secteur_num"),
+                         r.get("secteur_libelle"), r.get("comparaison"),
+                         round(_n(r.get("vol_total_p"))), round(_n(r.get("vol_total_n"))),
+                         round(_n(r.get("ecart_total"))), r.get("ecart_total_pct"),
+                         r.get("gravite")], "", i)
+        a = _agg(rz)
+        _ligne(ws2, [f"TOTAL {zlib}", "", f"{a['nb']} sect.", "", "",
+                     a["p"], a["n"], a["e"], a["pct"], ""], "sz")
+    a = _agg(rows)
+    _ligne(ws2, ["TOTAL GÉNÉRAL", "", f"{a['nb']} sect.", "", "",
+                 a["p"], a["n"], a["e"], a["pct"], ""], "tot")
+
+    # Variation : afficher le signe % à côté du chiffre (ex. -28,0 %)
+    for feuille, col in ((ws, 8), (ws2, 9)):
+        for rr in range(5, feuille.max_row + 1):
+            c = feuille.cell(rr, col)
+            if isinstance(c.value, (int, float)):
+                c.number_format = '0.0" %"'
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return _xlsx(buf.getvalue(), "synthese_dg_alertes.xlsx")
 
 
 # ============================================================

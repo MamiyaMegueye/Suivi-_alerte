@@ -681,9 +681,14 @@ main{max-width:1600px}
         <label for="sel-zone">Zone</label>
         <div class="fsel"><select id="sel-zone" style="padding-left:12px">
           <option value="">Toutes les zones</option>
-          <option value="2">Nouakchott</option>
-          <option value="3">Nouadhibou</option>
-          <option value="1">Intérieur</option>
+          <option value="11">NKTT NORD</option>
+          <option value="12">NKTT OUEST</option>
+          <option value="13">NKTT SUD</option>
+          <option value="14">NOUADHIBOU</option>
+          <option value="15">INTERIEUR EST</option>
+          <option value="16">INTERIEUR SUD</option>
+          <option value="17">INTERIEUR NORD</option>
+          <option value="18">INTERIEUR TRARZA</option>
         </select><svg class="i fc" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
       </div>
       <div class="fld">
@@ -734,6 +739,7 @@ main{max-width:1600px}
             <input type="checkbox" id="cb-nonlues"> Non consultées seulement
           </label>
           <button class="xls" id="btn-xls-alertes"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/></svg><span>Excel</span></button>
+          <button class="xls" id="btn-dg-alertes" title="Résumé par centre et par secteur pour la direction"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 16v-4"/><path d="M12 16V8"/><path d="M17 16v-7"/></svg><span>Synthèse DG</span></button>
           <button class="xls" id="btn-ab-alertes"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><span>Abonnés en baisse</span></button>
           <button id="btn-fermer-alertes">Masquer</button>
         </div>
@@ -1001,9 +1007,14 @@ main{max-width:1600px}
         <label>au <input type="date" id="mgc-d2"></label>
         <select id="mgc-zone">
           <option value="">Toutes les zones</option>
-          <option value="2">Nouakchott</option>
-          <option value="3">Nouadhibou</option>
-          <option value="1">Intérieur</option>
+          <option value="11">NKTT NORD</option>
+          <option value="12">NKTT OUEST</option>
+          <option value="13">NKTT SUD</option>
+          <option value="14">NOUADHIBOU</option>
+          <option value="15">INTERIEUR EST</option>
+          <option value="16">INTERIEUR SUD</option>
+          <option value="17">INTERIEUR NORD</option>
+          <option value="18">INTERIEUR TRARZA</option>
         </select>
         <select id="mgc-centre"><option value="">Tous les centres</option></select>
         <select id="mgc-statut">
@@ -1013,6 +1024,7 @@ main{max-width:1600px}
         <input type="search" id="mgc-q" placeholder="Rechercher…" style="min-width:180px">
         <button class="primary" id="mgc-go">Charger</button>
         <button id="mgc-vues" style="display:none">Marquer comme vues</button>
+        <button class="xls" id="mgc-syn" style="margin-left:auto;display:none" title="Nombre d'anomalies par centre : changements de compteur et résiliations"><span>Synthèse DG</span></button>
         <button class="xls" id="mgc-xls" style="margin-left:auto"><svg class="i" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg><span>Excel</span></button>
       </div>
     </section>
@@ -1040,7 +1052,7 @@ main{max-width:1600px}
     <section class="card">
       <div class="card-h">
         <div>
-          <p class="card-t">Anomalies — facture mutation à consommation nulle</p>
+          <p class="card-t">Anomalies — consommation nulle (changement de compteur et résiliation)</p>
           <p class="card-sub" id="mgc-cn-sub">Demandes validées : la facture mutation émise après la demande (≤ 45 j) a une consommation nulle. Exclu : facture précédente forfaitaire.</p>
         </div>
       </div>
@@ -1394,13 +1406,25 @@ function cleMoisCourant(){
   return d.getFullYear() * 100 + (d.getMonth() + 1);
 }
 
+function nomCentreCourant(){
+  const c = (S.centresListe || []).find(x=>String(x.centre_code) === String(S.centre));
+  return c ? (c.centre_libelle || c.centre_lib || ("centre " + S.centre)) : ("centre " + S.centre);
+}
+function qsExportAlertes(){
+  const p = new URLSearchParams({cycle: cleMoisCourant()});
+  if(S.zone) p.set("zone", S.zone);
+  if(S.centre) p.set("str_id", S.centre);
+  return p.toString();
+}
+
 async function majBandeau(flash){
   /* Toutes les alertes du MOIS EN COURS, tous centres confondus, quel que
      soit le cycle ou le centre affiché ; consultées ou non : le bandeau
      reste visible, seul le nombre de non consultées diminue. */
   let c, nonLues = 0;
   const cm = cleMoisCourant();
-  const q = "&cycle=" + cm + (S.zone ? "&zone=" + S.zone : "");
+  const q = "&cycle=" + cm + (S.zone ? "&zone=" + S.zone : "")
+          + (S.centre ? "&str_id=" + S.centre : "");
   try{
     c = await jget("/api/alertes/count?only_unack=false" + q);
     nonLues = (await jget("/api/alertes/count?only_unack=true" + q)).n || 0;
@@ -1419,7 +1443,8 @@ async function majBandeau(flash){
                              : " alerte de baisse de facturation")
       + " — " + MOIS_LIB[cm % 100 - 1] + " " + Math.floor(cm / 100)
       + (c.seuil_m3 ? " (≥ " + n0(c.seuil_m3) + " m³)" : "")
-      + (S.zone ? "" : ", toutes zones");
+      + (S.centre ? " — " + nomCentreCourant()
+                  : (S.zone ? "" : ", toutes zones"));
     document.getElementById("band-s").textContent =
       (nonLues ? n0(nonLues) + " non consultée(s)" : "toutes consultées") + " · "
       + n0(c.baisse_totale) + " m³ de baisse du volume total · "
@@ -1452,14 +1477,10 @@ async function consulterAlertes(){
       S.cycle = cm;
       remplirCyclesDeLAnnee();
       document.getElementById("sel-cycle").value = String(cm);
-      S.centre = ""; S.secteur = "";
+      S.secteur = "";
       await chargerListes();
+      document.getElementById("sel-centre").value = S.centre; majBandeau(false);
       S.avancement = []; S.retards = []; S.abonnes = null; S.gSynthese = null;
-      chargerTout();
-    }else if(S.centre){
-      S.centre = ""; S.secteur = "";
-      document.getElementById("sel-centre").value = "";
-      await chargerSecteursListe();
       chargerTout();
     }
     ouvrirVue("baisses");
@@ -2022,7 +2043,7 @@ function secteurCourant(){
 
 function allerAuDetail(strId, sectId){
   S.centre = String(strId);
-  document.getElementById("sel-centre").value = S.centre;
+  document.getElementById("sel-centre").value = S.centre; majBandeau(false);
   chargerSecteursListe().then(()=>{
     S.secteur = String(sectId);
     document.getElementById("sel-secteur").value = S.secteur;
@@ -2153,7 +2174,7 @@ function dessinerCentres(){
     tr.onclick = async ()=>{
       const c = tr.getAttribute("data-c");
       S.centre = (S.centre === c) ? "" : c;
-      document.getElementById("sel-centre").value = S.centre;
+      document.getElementById("sel-centre").value = S.centre; majBandeau(false);
       dessinerCentres();
       await chargerSecteursListe();
       chargerSecteurs();
@@ -2336,7 +2357,7 @@ function dessinerGrosCentres(){
     tr.onclick = async ()=>{
       const c = tr.getAttribute("data-c");
       S.centre = (S.centre === c) ? "" : c;
-      document.getElementById("sel-centre").value = S.centre;
+      document.getElementById("sel-centre").value = S.centre; majBandeau(false);
       dessinerGrosCentres();
       await chargerSecteursListe();
       chargerGrosSecteurs();
@@ -2792,7 +2813,7 @@ function dessinerChoix(){
   w.querySelectorAll("button[data-c]").forEach(b=>{
     b.onclick = async ()=>{
       S.centre = b.getAttribute("data-c"); S.secteur = "";
-      document.getElementById("sel-centre").value = S.centre;
+      document.getElementById("sel-centre").value = S.centre; majBandeau(false);
       await chargerSecteursListe();
       dessinerChoix();
     };
@@ -3054,6 +3075,7 @@ document.getElementById("sel-zone").onchange = async (ev)=>{
 };
 document.getElementById("sel-centre").onchange = async (ev)=>{
   S.centre = ev.target.value; S.secteur = "";
+  majBandeau(false);
   dessinerCentres(); if(S.gSynthese) dessinerGrosCentres();
   await chargerSecteursListe();
   S.avancement = []; S.retards = []; S.abonnes = null; S.gSynthese = null;
@@ -3102,7 +3124,12 @@ document.getElementById("cb-nonlues").onchange = (ev)=>{
   S.nonLues = ev.target.checked; ouvrirAlertes();
 };
 document.getElementById("btn-xls-alertes").onclick = (ev)=>{
-  telecharger("/api/export/alertes?cycle=" + cleMoisCourant(), ev.currentTarget);
+  telecharger("/api/export/alertes?" + qsExportAlertes(), ev.currentTarget);
+};
+document.getElementById("btn-dg-alertes").onclick = (ev)=>{
+  /* Synthèse DG : indépendante des filtres (toutes zones, tous centres). */
+  const p = new URLSearchParams({cycle: cleMoisCourant()});
+  telecharger("/api/export/alertes/synthese-dg?" + p.toString(), ev.currentTarget);
 };
 document.getElementById("btn-ab-alertes").onclick = ()=>{
   const sects = [...new Set((S.alertes||[]).map(r=>r.secteur_code))];
@@ -3201,7 +3228,7 @@ document.getElementById("btn-xls-ab").onclick = (ev)=>{
 };
 document.getElementById("band-voir").onclick = consulterAlertes;
 document.getElementById("band-xls").onclick = (ev)=>{
-  telecharger("/api/export/alertes?cycle=" + cleMoisCourant(), ev.currentTarget);
+  telecharger("/api/export/alertes?" + qsExportAlertes(), ev.currentTarget);
 };
 
 /* ============================================================
@@ -3240,7 +3267,8 @@ document.getElementById("band-xls").onclick = (ev)=>{
   let vues = new Set();
   try{ vues = new Set(JSON.parse(localStorage.getItem(VU_KEY) || "[]")); }catch(e){}
   const sauverVues = ()=>{ try{ localStorage.setItem(VU_KEY, JSON.stringify([...vues].slice(-5000))); }catch(e){} };
-  const estNouvelle = (r)=> r.STATUT === "Validé" && !vues.has(String(r.NUM_DEMANDE));
+  // pastille orange : changements de compteur seulement (pas les résiliations)
+  const estNouvelle = (r)=> r.STATUT === "Validé" && r.NATURE !== "Résiliation" && !vues.has(String(r.NUM_DEMANDE));
   const $ = (id)=>document.getElementById(id);
   const esc = (v)=> v===null||v===undefined ? "" :
     String(v).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -3256,10 +3284,10 @@ document.getElementById("band-xls").onclick = (ev)=>{
   };
 
   const COLS = [
-    ["NUM_DEMANDE","Num Demande"],["REF_ABONNEMENT","Réf Abo"],["CLIENT","Client"],
+    ["NATURE","Type"],["NUM_DEMANDE","Num Demande"],["REF_ABONNEMENT","Réf Abo"],["CLIENT","Client"],
     ["TYPE_DEMANDE","Type Demande"],["STATUT","Statut"],["DATE_DEMANDE","Date"],
     ["CENTRE","Centre"],["SECTEUR","Secteur"],["NUM_COMPTEUR","Num Compteur"],
-    ["CREE_PAR","Créé par"],["ADRESSE","Adresse"]
+    ["CREE_PAR","Créé par"],["MATRICULE_AGENT","Agent"],["ADRESSE","Adresse"]
   ];
 
   /* ---- Bascule d'onglet : on enveloppe sans modifier l'existant ---- */
@@ -3383,6 +3411,7 @@ document.getElementById("band-xls").onclick = (ev)=>{
       const nv = estNouvelle(r);
       const tm = r.TYPE_MUTATION ? ` <span style="color:var(--slate-400)">(${esc(r.TYPE_MUTATION)})</span>` : "";
       return `<tr class="${nv ? "g-FORTE" : ""}">
+        <td><span class="mgc-st ${r.NATURE === "Résiliation" ? "x" : "a"}">${esc(r.NATURE)||"—"}</span></td>
         <td class="mono">${esc(r.NUM_DEMANDE)}${nv ? '<span class="mgc-new">NOUVEAU</span>' : ""}</td>
         <td class="mono">${esc(r.REF_ABONNEMENT)||"—"}</td>
         <td class="trunc" title="${esc(r.CLIENT)}">${esc(r.CLIENT)}</td>
@@ -3393,6 +3422,7 @@ document.getElementById("band-xls").onclick = (ev)=>{
         <td><span class="mgc-sec">${esc(r.SECTEUR)}</span></td>
         <td class="mono">${esc(r.NUM_COMPTEUR)||"—"}</td>
         <td>${esc(r.CREE_PAR)||"—"}</td>
+        <td class="mono">${r.MATRICULE_AGENT?esc(r.MATRICULE_AGENT)+(r.NOM_AGENT?" — "+esc(r.NOM_AGENT):""):"—"}</td>
         <td class="trunc" title="${esc(r.ADRESSE)}">${esc(r.ADRESSE)||"—"}</td>
       </tr>`;
     }).join("");
@@ -3510,9 +3540,9 @@ document.getElementById("band-xls").onclick = (ev)=>{
   /* ---- Sous-onglet « Conso nulle » ---- */
   const CN = {rows: [], tri: {col: "DATE_DEMANDE", asc: false}, sous: "dem"};
   const COLS_CN = [
-    ["NUM_DEMANDE","Num Demande"],["DATE_DEMANDE","Date demande"],["REF_ABONNEMENT","Réf Abo"],
+    ["TYPE_DEMANDE","Type"],["NUM_DEMANDE","Num Demande"],["DATE_DEMANDE","Date demande"],["REF_ABONNEMENT","Réf Abo"],
     ["CLIENT","Client"],["CENTRE","Centre"],["SECTEUR","Secteur"],["NUM_COMPTEUR","Num Compteur"],
-    ["NUM_FACTURE","N° facture mutation"],["DATE_FACTURE","Date facture"],["DELAI_JOURS","Délai"],
+    ["MATRICULE_AGENT","Agent"],["NUM_FACTURE","N° facture mutation"],["DATE_FACTURE","Date facture"],["DELAI_JOURS","Délai"],
     ["CONSOMMATION","Conso"],["MONTANT","Montant"],["INDEX_DEBUT","Index début"],
     ["INDEX_FIN","Index fin"],["FACTURE_PRECEDENTE","Facture précédente"]
   ];
@@ -3547,7 +3577,7 @@ document.getElementById("band-xls").onclick = (ev)=>{
     });
     $("mgc-cn-sub").textContent = rows.length + " anomalie(s)" +
       (rows.length !== base.length ? " / " + base.length : "") +
-      " — facture mutation à consommation nulle après une demande validée (≤ 45 j). Exclu : facture précédente forfaitaire.";
+      " — demande validée dont la facture a une consommation nulle : facture Mutation pour un changement de compteur (≤ 45 j, sauf si facture précédente forfaitaire), facture Arrêt du compte pour une résiliation (mois de la demande à +45 j).";
     if(!rows.length){
       $("mgc-cn-w").innerHTML = '<div class="msg">Aucune anomalie de consommation nulle sur la période.</div>';
       return;
@@ -3555,6 +3585,7 @@ document.getElementById("band-xls").onclick = (ev)=>{
     const ar = (c)=> CN.tri.col === c ? `<span class="ar">${CN.tri.asc?"▲":"▼"}</span>` : "";
     const th = COLS_CN.map(([c,l])=>`<th data-c="${c}">${l}${ar(c)}</th>`).join("");
     const tb = rows.map(r=>`<tr class="g-FORTE">
+        <td><span class="mgc-st ${r.TYPE_DEMANDE === "Résiliation" ? "x" : "a"}">${esc(r.TYPE_DEMANDE)||"—"}</span></td>
         <td class="mono">${esc(r.NUM_DEMANDE)}</td>
         <td style="white-space:nowrap">${fmtDate(r.DATE_DEMANDE)}</td>
         <td class="mono">${esc(r.REF_ABONNEMENT)||"—"}</td>
@@ -3562,6 +3593,7 @@ document.getElementById("band-xls").onclick = (ev)=>{
         <td class="trunc">${esc(r.CENTRE)}</td>
         <td><span class="mgc-sec">${esc(r.SECTEUR)}</span></td>
         <td class="mono">${esc(r.NUM_COMPTEUR)||"—"}</td>
+        <td class="mono">${r.MATRICULE_AGENT?esc(r.MATRICULE_AGENT)+(r.NOM_AGENT?" — "+esc(r.NOM_AGENT):""):"—"}</td>
         <td class="mono">${esc(r.NUM_FACTURE)||"—"}</td>
         <td style="white-space:nowrap">${fmtDate(r.DATE_FACTURE)}</td>
         <td>${r.DELAI_JOURS ?? "—"} j</td>
@@ -3588,6 +3620,8 @@ document.getElementById("band-xls").onclick = (ev)=>{
     $("mgc-p-dem").style.display = s === "dem" ? "" : "none";
     $("mgc-p-cn").style.display  = s === "cn"  ? "" : "none";
     $("mgc-statut").style.display = s === "dem" ? "" : "none";   // sans objet pour la conso nulle
+    $("mgc-syn").style.display = s === "cn" ? "" : "none";
+    $("mgc-xls").style.marginLeft = s === "cn" ? "0" : "auto";
     if(s === "cn") dessinerCN();
   }
   document.querySelectorAll(".mgc-sous button").forEach(b=>
@@ -3608,6 +3642,12 @@ document.getElementById("band-xls").onclick = (ev)=>{
     if($("mgc-centre").value) p.set("str_id", $("mgc-centre").value);
     if(zoneCour()) p.set("zone", zoneCour());
     window.location.href = "/api/mutation-gc/conso-nulle/export?" + p;
+  };
+  $("mgc-syn").onclick = ()=>{
+    const p = params();
+    if($("mgc-centre").value) p.set("str_id", $("mgc-centre").value);
+    if(zoneCour()) p.set("zone", zoneCour());
+    window.location.href = "/api/mutation-gc/conso-nulle/synthese?" + p;
   };
   setInterval(()=>{ if(typeof S !== "undefined" && S.vue === "mgc") chargerCN(); }, INTERVALLE_MS);
   chargerCN();

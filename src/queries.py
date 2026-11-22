@@ -630,7 +630,7 @@ def secteurs(
 
     conditions = [cond_pop]
     if zone is not None:
-        conditions.append(f"zone_id = {int(zone)}")
+        conditions.append(config.zone_cond(zone))
     if str_id is not None:
         conditions.append("centre_code = ?")
         params.append(str_id)
@@ -659,7 +659,7 @@ def secteurs(
 
     comp = _lib_comparaison(annee, mois, pa, pm)
     for r in rows:
-        r["zone_lib"] = _zone(r.get("zone_id"))
+        config.appliquer_sous_zone(r)
         r["comparaison"] = comp
     return rows
 
@@ -701,13 +701,13 @@ def centres(annee: int, mois: int,
             CAST(SUM(vol_perdus) AS BIGINT)            AS vol_perdus
         FROM t
         WHERE etat = 'FACTURE' AND {cond_pop}
-          AND {f"zone_id = {int(zone)}" if zone is not None else "TRUE"}
+          AND {config.zone_cond(zone)}
         GROUP BY centre_code, centre_libelle, zone_id
         ORDER BY ecart ASC NULLS LAST
     """, params)
 
     for r in rows:
-        r["zone_lib"] = _zone(r.get("zone_id"))
+        config.appliquer_sous_zone(r)
         vp, vn = r.get("vol_p") or 0, r.get("vol_n") or 0
         if vp == 0 and vn == 0:
             r["gravite"] = "VIDE"
@@ -775,7 +775,7 @@ def synthese(annee: int, mois: int,
             CAST(SUM(vol_estime_p) AS BIGINT)            AS vol_estime_p
         FROM t
         WHERE etat = 'FACTURE' AND {cond_pop}
-          AND {f"zone_id = {int(zone)}" if zone is not None else "TRUE"}
+          AND {config.zone_cond(zone)}
     """, params)
 
     return {
@@ -922,7 +922,7 @@ def references(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
         WHERE centre_code = ? AND secteur_code = ?
     """, [annee, mois, pa, pm, annee, mois, pa, pm, str_id, sect_id])
     if entete:
-        entete["zone_lib"] = _zone(entete.get("zone_id"))
+        config.appliquer_sous_zone(entete)
 
     perdu = sum(-(r["ecart"] or 0) for r in rows if (r["ecart"] or 0) < 0)
     return {
@@ -965,7 +965,7 @@ def centres_list(annee: int, mois: int) -> list[dict]:
         ORDER BY centre_libelle
     """, [annee, mois])
     for r in rows:
-        r["zone_lib"] = _zone(r.get("zone_id"))
+        config.appliquer_sous_zone(r)
     return rows
 
 
@@ -1141,7 +1141,7 @@ def avancement(annee: int, mois: int, str_id: int | None = None,
     vols = _vols(pa, pm)
     vols1 = _vols(*cycles.mois_precedent(annee, mois)) if mens else {}
     for r in rows:
-        r["zone_lib"] = _zone(r.get("zone_id"))
+        config.appliquer_sous_zone(r)
         gros = r["secteur_code"] in mens
         r["comparaison"] = "N-1" if gros else "N-2"
         v = (vols1 if gros else vols).get(
@@ -1453,7 +1453,7 @@ def abonnes(annee: int, mois: int, str_id: int, sect_id: int) -> dict:
         WHERE centre_code = ? AND secteur_code = ?
     """, [annee, mois, pa, pm, annee, mois, pa, pm, str_id, sect_id])
     if entete:
-        entete["zone_lib"] = _zone(entete.get("zone_id"))
+        config.appliquer_sous_zone(entete)
 
     def _n(statut: str) -> int:
         return sum(1 for r in rows if r["statut_saisie"] == statut)
@@ -1740,7 +1740,7 @@ def retards(annee: int, mois: int, str_id: int | None = None,
     """, params)
 
     for r in rows:
-        r["zone_lib"] = _zone(r.get("zone_id"))
+        config.appliquer_sous_zone(r)
         r["colonne_deadline"] = config.COLONNE_DEADLINE
     return rows
 
